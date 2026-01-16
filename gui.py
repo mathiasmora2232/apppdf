@@ -7,7 +7,7 @@ from datetime import datetime
 
 from tools import (
     pdf_to_docx, pdf_to_docx_with_progress,
-    docx_to_pdf,
+    docx_to_pdf, docx_to_pdf_with_progress,
     compress_pdf_with_progress,
     compress_docx_images_with_progress,
     pdf_to_docx_raster, pdf_to_docx_raster_with_progress,
@@ -239,6 +239,7 @@ class Pdf2WordApp(ctk.CTk):
         self.var_batch_docx2pdf = ctk.BooleanVar(value=False)
         self.var_batch_overwrite = ctk.BooleanVar(value=True)
         self.var_batch_dpi = ctk.IntVar(value=200)
+        self.var_batch_quality = ctk.StringVar(value="Media")  # Alta, Media, Baja
 
         # Variables - Imagenes
         self.var_img_input = ctk.StringVar()
@@ -618,10 +619,22 @@ class Pdf2WordApp(ctk.CTk):
         ctk.CTkCheckBox(checks_frame, text="DOCX → PDF", variable=self.var_batch_docx2pdf).pack(side="left", padx=10)
         ctk.CTkCheckBox(checks_frame, text="Sobrescribir", variable=self.var_batch_overwrite).pack(side="left", padx=10)
 
-        dpi_frame = ctk.CTkFrame(options_frame, fg_color="transparent")
-        dpi_frame.pack(fill="x", padx=15, pady=(0, 12))
-        ctk.CTkLabel(dpi_frame, text="DPI (modo imagen):").pack(side="left")
-        ctk.CTkEntry(dpi_frame, textvariable=self.var_batch_dpi, width=60).pack(side="left", padx=10)
+        settings_frame = ctk.CTkFrame(options_frame, fg_color="transparent")
+        settings_frame.pack(fill="x", padx=15, pady=(0, 12))
+
+        ctk.CTkLabel(settings_frame, text="DPI (modo imagen):").pack(side="left")
+        ctk.CTkEntry(settings_frame, textvariable=self.var_batch_dpi, width=60).pack(side="left", padx=10)
+
+        ctk.CTkLabel(settings_frame, text="Calidad:").pack(side="left", padx=(20, 5))
+        ctk.CTkOptionMenu(
+            settings_frame,
+            variable=self.var_batch_quality,
+            values=["Alta", "Media", "Baja"],
+            width=100,
+            fg_color="#3B8ED0",
+            button_color="#36719F",
+            button_hover_color="#144870"
+        ).pack(side="left", padx=5)
 
         ctk.CTkButton(options_frame, text="Iniciar Conversion", width=220, height=50, fg_color="#4CAF50", hover_color="#388E3C", font=ctk.CTkFont(size=16, weight="bold"), corner_radius=12, command=self.on_run_batch).pack(side="right", padx=15, pady=15)
 
@@ -651,9 +664,11 @@ class Pdf2WordApp(ctk.CTk):
         if mode == "Dark":
             ctk.set_appearance_mode("light")
             self.theme_switch.deselect()
+            self.theme_switch.configure(text="Modo Claro")
         else:
             ctk.set_appearance_mode("dark")
             self.theme_switch.select()
+            self.theme_switch.configure(text="Modo Oscuro")
 
     # --- File browsers ---
     def on_browse_pdf(self) -> None:
@@ -993,6 +1008,12 @@ class Pdf2WordApp(ctk.CTk):
         overwrite = bool(self.var_batch_overwrite.get())
         items = list(self.batch_files)
 
+        # Mapear calidad a DPI
+        quality_map = {"Alta": 300, "Media": 200, "Baja": 100}
+        quality_str = self.var_batch_quality.get()
+        if quality_str in quality_map and do_raster:
+            dpi = quality_map[quality_str]
+
         pdfs = [p for p in items if p.suffix.lower() == ".pdf"]
         docxs = [p for p in items if p.suffix.lower() == ".docx"]
 
@@ -1000,6 +1021,7 @@ class Pdf2WordApp(ctk.CTk):
         modal.log(f"Archivos totales: {len(items)}")
         modal.log(f"PDFs: {len(pdfs)} | DOCXs: {len(docxs)}")
         modal.log(f"Carpeta destino: {outdir}")
+        modal.log(f"Calidad: {quality_str} (DPI: {dpi})")
 
         def task():
             try:
@@ -1015,6 +1037,7 @@ class Pdf2WordApp(ctk.CTk):
                     return
 
                 done = 0
+                success_count = 0
                 errors = []
 
                 if do_pdf2docx:
@@ -1034,9 +1057,20 @@ class Pdf2WordApp(ctk.CTk):
                             else:
                                 pdf_to_docx(p, tgt, None, None, overwrite)
                             modal.log(f"Completado: {p.name}", "success")
+                            success_count += 1
                         except Exception as e:
-                            modal.log(f"Error en {p.name}: {e}", "error")
-                            errors.append(p.name)
+                            if not do_raster:
+                                modal.log(f"Fallo en editable: {e}. Intentando modo imagen...", "warning")
+                                try:
+                                    pdf_to_docx_raster(p, tgt, dpi=dpi, overwrite=overwrite)
+                                    modal.log(f"Completado (fallback imagen): {p.name}", "success")
+                                    success_count += 1
+                                except Exception as e2:
+                                    modal.log(f"Error en {p.name}: {e2}", "error")
+                                    errors.append((p.name, str(e2)))
+                            else:
+                                modal.log(f"Error en {p.name}: {e}", "error")
+                                errors.append((p.name, str(e)))
 
                         done += 1
                         modal.set_progress(done, total, f"{done}/{total} archivos")
@@ -1054,19 +1088,30 @@ class Pdf2WordApp(ctk.CTk):
                         try:
                             docx_to_pdf(d, tgt, overwrite)
                             modal.log(f"Completado: {d.name}", "success")
+                            success_count += 1
                         except Exception as e:
                             modal.log(f"Error en {d.name}: {e}", "error")
-                            errors.append(d.name)
+                            errors.append((d.name, str(e)))
 
                         done += 1
                         modal.set_progress(done, total, f"{done}/{total} archivos")
 
+                # Resumen final
+                modal.log("=" * 40)
+                modal.log(f"RESUMEN: {success_count} exitosos, {len(errors)} errores")
+
                 if errors:
-                    modal.complete(True, f"Completado con {len(errors)} errores")
+                    modal.log("Archivos con error:")
+                    for fname, err in errors[:10]:  # Mostrar máximo 10
+                        modal.log(f"  - {fname}: {err[:50]}...", "error")
+                    if len(errors) > 10:
+                        modal.log(f"  ... y {len(errors) - 10} mas", "warning")
+                    modal.complete(True, f"Completado: {success_count} OK, {len(errors)} errores")
                 else:
                     modal.complete(True, f"Lote completado: {done} archivos")
 
             except InterruptedError:
+                modal.log("Operacion cancelada por el usuario", "warning")
                 modal.complete(False, "Operacion cancelada")
             except Exception as e:
                 modal.log(str(e), "error")
