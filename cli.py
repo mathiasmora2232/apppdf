@@ -2,7 +2,7 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
-from tools import pdf_to_docx, docx_to_pdf, compress_pdf, compress_docx_images
+from tools import pdf_to_docx, docx_to_pdf, compress_pdf, compress_docx_images, pdf_to_docx_raster
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -51,6 +51,13 @@ def main():
         out = Path(args.output) if args.output else inp.with_suffix(".docx")
         pdf_to_docx(inp, out, args.start, args.end, args.overwrite)
         print(f"Conversión completada: {out}")
+
+    elif args.cmd == "pdf2docx-raster":
+        inp = Path(args.input)
+        out = Path(args.output) if args.output else inp.with_suffix(".docx")
+        dpi = getattr(args, 'dpi', 200)
+        pdf_to_docx_raster(inp, out, dpi=dpi)
+        print(f"Conversión (raster) completada: {out}")
 
     elif args.cmd == "docx2pdf":
         inp = Path(args.input)
