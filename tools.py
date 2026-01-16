@@ -105,7 +105,7 @@ def compress_docx_images(input_docx: Path, output_docx: Path, quality: int = 75,
             zout.writestr(item, data)
  
 
-def pdf_to_docx_raster(input_pdf: Path, output_docx: Path, dpi: int = 200) -> None:
+def pdf_to_docx_raster(input_pdf: Path, output_docx: Path, dpi: int = 200, overwrite: bool = False) -> None:
     """Convierte cada página del PDF a imagen y la inserta en un DOCX.
     Máxima fidelidad visual (no editable)."""
     if not input_pdf.exists():
@@ -113,6 +113,15 @@ def pdf_to_docx_raster(input_pdf: Path, output_docx: Path, dpi: int = 200) -> No
 
     output_docx = output_docx.with_suffix(".docx")
     output_docx.parent.mkdir(parents=True, exist_ok=True)
+    if output_docx.exists():
+        if overwrite:
+            try:
+                output_docx.unlink()
+            except Exception:
+                # Si no podemos borrar, lanzamos error explícito
+                raise PermissionError(f"No se puede sobrescribir: {output_docx}")
+        else:
+            raise FileExistsError(f"El archivo de salida ya existe: {output_docx}")
 
     doc_pdf = fitz.open(str(input_pdf))
     docx_doc = Document()
@@ -159,7 +168,7 @@ def batch_pdf_to_docx(
             continue
         target = out_dir / (f.stem + ".docx")
         if mode == "raster":
-            pdf_to_docx_raster(f, target, dpi=dpi)
+            pdf_to_docx_raster(f, target, dpi=dpi, overwrite=overwrite)
         else:
             pdf_to_docx(f, target, start_page, end_page, overwrite)
 

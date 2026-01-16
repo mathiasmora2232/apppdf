@@ -34,6 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     p1r.add_argument("input", help="Ruta al PDF")
     p1r.add_argument("-o", "--output", help="Ruta del DOCX de salida")
     p1r.add_argument("--dpi", type=int, default=200, help="Resolución de render (por defecto 200 DPI)")
+    p1r.add_argument("--overwrite", action="store_true", help="Sobrescribe si el DOCX existe")
 
     # docx2pdf
     p2 = sub.add_parser("docx2pdf", help="Convertir DOCX a PDF")
@@ -81,7 +82,7 @@ def main():
         inp = Path(args.input)
         out = Path(args.output) if args.output else inp.with_suffix(".docx")
         dpi = getattr(args, 'dpi', 200)
-        pdf_to_docx_raster(inp, out, dpi=dpi)
+        pdf_to_docx_raster(inp, out, dpi=dpi, overwrite=args.overwrite)
         print(f"Conversión (raster) completada: {out}")
 
     elif args.cmd == "docx2pdf":

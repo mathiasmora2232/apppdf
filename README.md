@@ -19,13 +19,15 @@ python -m pip install -r requirements.txt
 Ejecuta la interfaz para seleccionar un PDF y convertirlo sin usar la terminal.
 
 ```powershell
-C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe gui.py
+C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe convertidor.py
 ```
 
 En la ventana podrás:
 - PDF → DOCX: elegir PDF, salida DOCX opcional, rango de páginas y sobrescribir.
+- Fidelidad exacta (imagen): genera DOCX idéntico visualmente al PDF (menos editable).
 - DOCX → PDF: elegir DOCX y salida PDF (usa Microsoft Word vía docx2pdf si está disponible).
 - Compresión: optimizar PDF (limpieza y deflate) y comprimir imágenes en DOCX (calidad y tamaño máximo).
+- Lotes: agregar múltiples archivos (PDF/DOCX), elegir carpeta de salida y convertir en bloque.
 
 ## Uso rápido
 
@@ -67,6 +69,11 @@ C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe cli.py compress-p
 
 # Comprimir imágenes dentro de DOCX
 C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe cli.py compress-docx "input.docx" -o "compressed.docx" --quality 70 --max-width 1600 --max-height 1200
+
+# Procesar por lotes en una carpeta (PDF/DOCX)
+C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe cli.py batch "C:\ruta\carpeta" --outdir "C:\ruta\salida" --pdf2docx --docx2pdf --overwrite
+# Modo fidelidad exacta (imagen) para PDFs
+C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe cli.py batch "C:\ruta\carpeta" --outdir "C:\ruta\salida" --pdf2docx-raster --dpi 200
 ```
 
 ## Limitaciones y notas
