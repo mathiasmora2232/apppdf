@@ -6,9 +6,13 @@ from typing import Optional, Callable
 from datetime import datetime
 
 from tools import (
-    pdf_to_docx_with_progress, docx_to_pdf, compress_pdf_with_progress,
-    compress_docx_images_with_progress, pdf_to_docx_raster_with_progress,
-    ocr_pdf_to_docx_with_progress, convert_image, batch_convert_images,
+    pdf_to_docx, pdf_to_docx_with_progress,
+    docx_to_pdf,
+    compress_pdf_with_progress,
+    compress_docx_images_with_progress,
+    pdf_to_docx_raster, pdf_to_docx_raster_with_progress,
+    ocr_pdf_to_docx_with_progress,
+    convert_image,
     get_image_info, extract_images_from_pdf, extract_images_from_docx,
     SUPPORTED_IMAGE_FORMATS
 )
@@ -730,24 +734,31 @@ class Pdf2WordApp(ctk.CTk):
         output_docx = Path(out_path) if out_path else input_pdf.with_suffix(".docx")
         overwrite = bool(self.var_overwrite.get())
 
-        th = threading.Thread(
-            target=self._convert_pdf2docx_task,
-            args=(input_pdf, output_docx, start_i, end_i, overwrite),
-            daemon=True,
-        )
+        # Crear modal de progreso
+        modal = ProgressModal(self, "Convirtiendo PDF a DOCX")
+        modal.log(f"Archivo: {input_pdf.name}")
+        modal.log(f"Salida: {output_docx.name}")
+
+        def task():
+            try:
+                def progress_cb(current, total, msg):
+                    modal.set_progress(current, total, msg)
+                    modal.log(msg, "progress")
+
+                pdf_to_docx_with_progress(
+                    input_pdf, output_docx, start_i, end_i, overwrite,
+                    progress_callback=progress_cb,
+                    cancel_check=modal.is_cancelled
+                )
+                modal.complete(True, f"Archivo creado: {output_docx.name}")
+            except InterruptedError:
+                modal.complete(False, "Operacion cancelada por el usuario")
+            except Exception as e:
+                modal.log(str(e), "error")
+                modal.complete(False, str(e))
+
+        th = threading.Thread(target=task, daemon=True)
         th.start()
-
-    def _convert_pdf2docx_task(self, input_pdf: Path, output_docx: Path, start_i: Optional[int], end_i: Optional[int], overwrite: bool) -> None:
-        try:
-            self._set_status("Convirtiendo...", indeterminate=True)
-            pdf_to_docx(input_pdf, output_docx, start_i, end_i, overwrite)
-        except Exception as e:
-            self._set_status("Error en la conversion")
-            self.after(0, lambda: messagebox.showerror("Error", str(e)))
-            return
-
-        self._set_status("Conversion completada")
-        self.after(0, lambda: messagebox.showinfo("Listo", f"Archivo creado:\n{output_docx}"))
 
     def on_convert_pdf2docx_raster(self) -> None:
         in_path = self.var_input.get().strip()
@@ -755,22 +766,36 @@ class Pdf2WordApp(ctk.CTk):
         if not in_path:
             messagebox.showwarning("Falta archivo", "Selecciona un archivo PDF de entrada.")
             return
+
         input_pdf = Path(in_path)
         output_docx = Path(out_path) if out_path else input_pdf.with_suffix(".docx")
         dpi = int(self.var_raster_dpi.get()) if str(self.var_raster_dpi.get()).strip() else 200
-        th = threading.Thread(target=self._convert_pdf2docx_raster_task, args=(input_pdf, output_docx, dpi), daemon=True)
-        th.start()
+        overwrite = bool(self.var_overwrite.get())
 
-    def _convert_pdf2docx_raster_task(self, input_pdf: Path, output_docx: Path, dpi: int) -> None:
-        try:
-            self._set_status("Convirtiendo (imagen)...", indeterminate=True)
-            pdf_to_docx_raster(input_pdf, output_docx, dpi=dpi)
-        except Exception as e:
-            self._set_status("Error en conversion por imagen")
-            self.after(0, lambda: messagebox.showerror("Error", str(e)))
-            return
-        self._set_status("Conversion completada")
-        self.after(0, lambda: messagebox.showinfo("Listo", f"Archivo creado:\n{output_docx}"))
+        modal = ProgressModal(self, "Convirtiendo PDF a Imagen")
+        modal.log(f"Archivo: {input_pdf.name}")
+        modal.log(f"DPI: {dpi}")
+
+        def task():
+            try:
+                def progress_cb(current, total, msg):
+                    modal.set_progress(current, total, msg)
+                    modal.log(msg, "progress")
+
+                pdf_to_docx_raster_with_progress(
+                    input_pdf, output_docx, dpi=dpi, overwrite=overwrite,
+                    progress_callback=progress_cb,
+                    cancel_check=modal.is_cancelled
+                )
+                modal.complete(True, f"Archivo creado: {output_docx.name}")
+            except InterruptedError:
+                modal.complete(False, "Operacion cancelada")
+            except Exception as e:
+                modal.log(str(e), "error")
+                modal.complete(False, str(e))
+
+        th = threading.Thread(target=task, daemon=True)
+        th.start()
 
     def on_convert_pdf2docx_ocr(self) -> None:
         in_path = self.var_input.get().strip()
@@ -778,23 +803,36 @@ class Pdf2WordApp(ctk.CTk):
         if not in_path:
             messagebox.showwarning("Falta archivo", "Selecciona un archivo PDF de entrada.")
             return
+
         input_pdf = Path(in_path)
         output_docx = Path(out_path) if out_path else input_pdf.with_suffix(".docx")
         dpi = int(self.var_ocr_dpi.get()) if str(self.var_ocr_dpi.get()).strip() else 300
         lang = self.var_ocr_lang.get().strip() or "spa"
-        th = threading.Thread(target=self._convert_pdf2docx_ocr_task, args=(input_pdf, output_docx, dpi, lang), daemon=True)
-        th.start()
 
-    def _convert_pdf2docx_ocr_task(self, input_pdf: Path, output_docx: Path, dpi: int, lang: str) -> None:
-        try:
-            self._set_status("Convirtiendo (OCR)...", indeterminate=True)
-            ocr_pdf_to_docx(input_pdf, output_docx, dpi=dpi, lang=lang)
-        except Exception as e:
-            self._set_status("Error en OCR")
-            self.after(0, lambda: messagebox.showerror("Error", str(e)))
-            return
-        self._set_status("Conversion completada")
-        self.after(0, lambda: messagebox.showinfo("Listo", f"Archivo creado:\n{output_docx}"))
+        modal = ProgressModal(self, "Conversion OCR")
+        modal.log(f"Archivo: {input_pdf.name}")
+        modal.log(f"Idioma: {lang} | DPI: {dpi}")
+
+        def task():
+            try:
+                def progress_cb(current, total, msg):
+                    modal.set_progress(current, total, msg)
+                    modal.log(msg, "progress")
+
+                ocr_pdf_to_docx_with_progress(
+                    input_pdf, output_docx, dpi=dpi, lang=lang,
+                    progress_callback=progress_cb,
+                    cancel_check=modal.is_cancelled
+                )
+                modal.complete(True, f"Archivo creado: {output_docx.name}")
+            except InterruptedError:
+                modal.complete(False, "Operacion cancelada")
+            except Exception as e:
+                modal.log(str(e), "error")
+                modal.complete(False, str(e))
+
+        th = threading.Thread(target=task, daemon=True)
+        th.start()
 
     def on_convert_docx2pdf(self) -> None:
         inp = self.var_docx_in.get().strip()
@@ -826,19 +864,37 @@ class Pdf2WordApp(ctk.CTk):
         if not inp or not out:
             messagebox.showwarning("Faltan rutas", "Selecciona PDF de entrada y salida.")
             return
-        th = threading.Thread(target=self._compress_pdf_task, args=(Path(inp), Path(out)), daemon=True)
-        th.start()
 
-    def _compress_pdf_task(self, inp: Path, out: Path) -> None:
-        try:
-            self._set_status("Optimizando PDF...", indeterminate=True)
-            compress_pdf(inp, out)
-        except Exception as e:
-            self._set_status("Error al optimizar PDF")
-            self.after(0, lambda: messagebox.showerror("Error", str(e)))
-            return
-        self._set_status("PDF optimizado")
-        self.after(0, lambda: messagebox.showinfo("Listo", f"PDF optimizado:\n{out}"))
+        input_path = Path(inp)
+        output_path = Path(out)
+
+        modal = ProgressModal(self, "Optimizando PDF")
+        modal.log(f"Archivo: {input_path.name}")
+        original_size = input_path.stat().st_size
+        modal.log(f"Tamaño original: {self._format_size(original_size)}")
+
+        def task():
+            try:
+                def progress_cb(current, total, msg):
+                    modal.set_progress(current, total, msg)
+                    modal.log(msg, "progress")
+
+                result = compress_pdf_with_progress(
+                    input_path, output_path,
+                    progress_callback=progress_cb,
+                    cancel_check=modal.is_cancelled
+                )
+                modal.log(f"Tamaño final: {self._format_size(result['new_size'])}")
+                modal.log(f"Reduccion: {result['reduction_percent']:.1f}%", "success")
+                modal.complete(True, f"PDF optimizado ({result['reduction_percent']:.1f}% reducido)")
+            except InterruptedError:
+                modal.complete(False, "Operacion cancelada")
+            except Exception as e:
+                modal.log(str(e), "error")
+                modal.complete(False, str(e))
+
+        th = threading.Thread(target=task, daemon=True)
+        th.start()
 
     def on_compress_docx(self) -> None:
         inp = self.var_docx_comp_in.get().strip()
@@ -852,19 +908,48 @@ class Pdf2WordApp(ctk.CTk):
         if not inp or not out:
             messagebox.showwarning("Faltan rutas", "Selecciona DOCX de entrada y salida.")
             return
-        th = threading.Thread(target=self._compress_docx_task, args=(Path(inp), Path(out), q, max_w, max_h), daemon=True)
+
+        input_path = Path(inp)
+        output_path = Path(out)
+
+        modal = ProgressModal(self, "Comprimiendo DOCX")
+        modal.log(f"Archivo: {input_path.name}")
+        modal.log(f"Calidad JPEG: {q}%")
+        original_size = input_path.stat().st_size
+        modal.log(f"Tamaño original: {self._format_size(original_size)}")
+
+        def task():
+            try:
+                def progress_cb(current, total, msg):
+                    modal.set_progress(current, total, msg)
+                    modal.log(msg, "progress")
+
+                result = compress_docx_images_with_progress(
+                    input_path, output_path, quality=q,
+                    max_width=max_w, max_height=max_h,
+                    progress_callback=progress_cb,
+                    cancel_check=modal.is_cancelled
+                )
+                modal.log(f"Imagenes procesadas: {result['images_processed']}")
+                modal.log(f"Tamaño final: {self._format_size(result['new_size'])}")
+                modal.log(f"Reduccion: {result['reduction_percent']:.1f}%", "success")
+                modal.complete(True, f"DOCX comprimido ({result['reduction_percent']:.1f}% reducido)")
+            except InterruptedError:
+                modal.complete(False, "Operacion cancelada")
+            except Exception as e:
+                modal.log(str(e), "error")
+                modal.complete(False, str(e))
+
+        th = threading.Thread(target=task, daemon=True)
         th.start()
 
-    def _compress_docx_task(self, inp: Path, out: Path, q: int, max_w: Optional[int], max_h: Optional[int]) -> None:
-        try:
-            self._set_status("Comprimiendo imagenes DOCX...", indeterminate=True)
-            compress_docx_images(inp, out, quality=q, max_width=max_w, max_height=max_h)
-        except Exception as e:
-            self._set_status("Error al comprimir DOCX")
-            self.after(0, lambda: messagebox.showerror("Error", str(e)))
-            return
-        self._set_status("DOCX comprimido")
-        self.after(0, lambda: messagebox.showinfo("Listo", f"DOCX comprimido:\n{out}"))
+    def _format_size(self, size_bytes: int) -> str:
+        """Formatea bytes a formato legible."""
+        for unit in ["B", "KB", "MB", "GB"]:
+            if size_bytes < 1024:
+                return f"{size_bytes:.1f} {unit}"
+            size_bytes /= 1024
+        return f"{size_bytes:.1f} TB"
 
     # --- Batch ---
     def on_add_pdfs(self) -> None:
@@ -899,48 +984,96 @@ class Pdf2WordApp(ctk.CTk):
         if not self.batch_files:
             messagebox.showwarning("Sin archivos", "Agrega archivos a la lista primero.")
             return
+
         outdir = Path(self.var_outdir_batch.get()) if self.var_outdir_batch.get().strip() else Path.cwd()
         do_pdf2docx = bool(self.var_batch_pdf2docx.get())
         do_raster = bool(self.var_batch_raster.get())
         do_docx2pdf = bool(self.var_batch_docx2pdf.get())
         dpi = int(self.var_batch_dpi.get()) if str(self.var_batch_dpi.get()).strip() else 200
         overwrite = bool(self.var_batch_overwrite.get())
-        th = threading.Thread(target=self._run_batch_task, args=(list(self.batch_files), outdir, do_pdf2docx, do_raster, do_docx2pdf, dpi, overwrite), daemon=True)
+        items = list(self.batch_files)
+
+        pdfs = [p for p in items if p.suffix.lower() == ".pdf"]
+        docxs = [p for p in items if p.suffix.lower() == ".docx"]
+
+        modal = ProgressModal(self, "Conversion por Lotes")
+        modal.log(f"Archivos totales: {len(items)}")
+        modal.log(f"PDFs: {len(pdfs)} | DOCXs: {len(docxs)}")
+        modal.log(f"Carpeta destino: {outdir}")
+
+        def task():
+            try:
+                total = 0
+                if do_pdf2docx:
+                    total += len(pdfs)
+                if do_docx2pdf:
+                    total += len(docxs)
+
+                if total == 0:
+                    modal.log("No hay archivos para procesar", "warning")
+                    modal.complete(True, "Sin archivos para procesar")
+                    return
+
+                done = 0
+                errors = []
+
+                if do_pdf2docx:
+                    mode = "imagen" if do_raster else "editable"
+                    modal.log(f"Convirtiendo PDFs a DOCX (modo {mode})...")
+
+                    for p in pdfs:
+                        if modal.is_cancelled():
+                            raise InterruptedError("Cancelado")
+
+                        tgt = outdir / (p.stem + ".docx")
+                        modal.log(f"Procesando: {p.name}", "progress")
+
+                        try:
+                            if do_raster:
+                                pdf_to_docx_raster(p, tgt, dpi=dpi, overwrite=overwrite)
+                            else:
+                                pdf_to_docx(p, tgt, None, None, overwrite)
+                            modal.log(f"Completado: {p.name}", "success")
+                        except Exception as e:
+                            modal.log(f"Error en {p.name}: {e}", "error")
+                            errors.append(p.name)
+
+                        done += 1
+                        modal.set_progress(done, total, f"{done}/{total} archivos")
+
+                if do_docx2pdf:
+                    modal.log("Convirtiendo DOCXs a PDF...")
+
+                    for d in docxs:
+                        if modal.is_cancelled():
+                            raise InterruptedError("Cancelado")
+
+                        tgt = outdir / (d.stem + ".pdf")
+                        modal.log(f"Procesando: {d.name}", "progress")
+
+                        try:
+                            docx_to_pdf(d, tgt, overwrite)
+                            modal.log(f"Completado: {d.name}", "success")
+                        except Exception as e:
+                            modal.log(f"Error en {d.name}: {e}", "error")
+                            errors.append(d.name)
+
+                        done += 1
+                        modal.set_progress(done, total, f"{done}/{total} archivos")
+
+                if errors:
+                    modal.complete(True, f"Completado con {len(errors)} errores")
+                else:
+                    modal.complete(True, f"Lote completado: {done} archivos")
+
+            except InterruptedError:
+                modal.complete(False, "Operacion cancelada")
+            except Exception as e:
+                modal.log(str(e), "error")
+                modal.complete(False, str(e))
+
+        th = threading.Thread(target=task, daemon=True)
         th.start()
-
-    def _run_batch_task(self, items: list[Path], outdir: Path, do_pdf2docx: bool, do_raster: bool, do_docx2pdf: bool, dpi: int, overwrite: bool) -> None:
-        try:
-            self._set_status("Procesando lote...", indeterminate=True)
-            pdfs = [p for p in items if p.suffix.lower() == ".pdf"]
-            docxs = [p for p in items if p.suffix.lower() == ".docx"]
-            total = 0
-            if do_pdf2docx:
-                total += len(pdfs)
-            if do_docx2pdf:
-                total += len(docxs)
-
-            done = 0
-            if do_pdf2docx:
-                for p in pdfs:
-                    tgt = outdir / (p.stem + ".docx")
-                    if do_raster:
-                        pdf_to_docx_raster(p, tgt, dpi=dpi, overwrite=overwrite)
-                    else:
-                        pdf_to_docx(p, tgt, None, None, overwrite)
-                    done += 1
-                    self._update_progress(done, total)
-            if do_docx2pdf:
-                for d in docxs:
-                    tgt = outdir / (d.stem + ".pdf")
-                    docx_to_pdf(d, tgt, overwrite)
-                    done += 1
-                    self._update_progress(done, total)
-        except Exception as e:
-            self._set_status("Error en lote")
-            self.after(0, lambda: messagebox.showerror("Error", str(e)))
-            return
-        self._set_status("Lote completado")
-        self.after(0, lambda: messagebox.showinfo("Listo", f"Lote completado en:\n{outdir}"))
 
     def _update_progress(self, current: int, total: int) -> None:
         if total > 0:
@@ -1077,10 +1210,12 @@ class Pdf2WordApp(ctk.CTk):
         if not self.img_batch_files:
             messagebox.showwarning("Sin archivos", "Agrega imagenes a la lista primero.")
             return
+
         outdir = Path(self.var_img_outdir.get()) if self.var_img_outdir.get().strip() else Path.cwd()
         fmt = self.var_img_format.get().lower()
         quality = int(self.var_img_quality.get()) if str(self.var_img_quality.get()).strip() else 95
         overwrite = bool(self.var_img_overwrite.get())
+        files = list(self.img_batch_files)
 
         # Redimension
         resize = None
@@ -1097,33 +1232,48 @@ class Pdf2WordApp(ctk.CTk):
 
         maintain_aspect = bool(self.var_img_maintain_aspect.get())
 
-        th = threading.Thread(
-            target=self._convert_images_batch_task,
-            args=(list(self.img_batch_files), outdir, fmt, quality, resize, maintain_aspect, overwrite),
-            daemon=True
-        )
+        modal = ProgressModal(self, "Convirtiendo Imagenes")
+        modal.log(f"Imagenes: {len(files)}")
+        modal.log(f"Formato destino: {fmt.upper()}")
+        modal.log(f"Calidad: {quality}%")
+
+        def task():
+            try:
+                total = len(files)
+                done = 0
+                errors = []
+
+                for f in files:
+                    if modal.is_cancelled():
+                        raise InterruptedError("Cancelado")
+
+                    ext = fmt if fmt != "jpeg" else "jpg"
+                    target = outdir / (f.stem + "." + ext)
+                    modal.log(f"Convirtiendo: {f.name}", "progress")
+
+                    try:
+                        convert_image(f, target, fmt, quality, resize, maintain_aspect, overwrite)
+                        modal.log(f"Completado: {f.name} -> {target.name}", "success")
+                    except Exception as e:
+                        modal.log(f"Error en {f.name}: {e}", "error")
+                        errors.append(f.name)
+
+                    done += 1
+                    modal.set_progress(done, total, f"{done}/{total} imagenes")
+
+                if errors:
+                    modal.complete(True, f"Completado con {len(errors)} errores")
+                else:
+                    modal.complete(True, f"Convertidas {done} imagenes")
+
+            except InterruptedError:
+                modal.complete(False, "Operacion cancelada")
+            except Exception as e:
+                modal.log(str(e), "error")
+                modal.complete(False, str(e))
+
+        th = threading.Thread(target=task, daemon=True)
         th.start()
-
-    def _convert_images_batch_task(self, files: list[Path], outdir: Path, fmt: str, quality: int, resize, maintain_aspect: bool, overwrite: bool) -> None:
-        try:
-            self._set_status("Convirtiendo imagenes...", indeterminate=True)
-
-            def progress_cb(current, total):
-                self._update_progress(current, total)
-
-            ok, errors = batch_convert_images(
-                files, outdir, fmt, quality, resize, maintain_aspect, overwrite, progress_cb
-            )
-        except Exception as e:
-            self._set_status("Error en lote de imagenes")
-            self.after(0, lambda: messagebox.showerror("Error", str(e)))
-            return
-
-        self._set_status("Lote completado")
-        msg = f"Convertidas: {ok} imagenes"
-        if errors:
-            msg += f"\nErrores: {len(errors)}"
-        self.after(0, lambda: messagebox.showinfo("Listo", msg))
 
     # --- Extract images handlers ---
     def on_browse_extract_input(self) -> None:
