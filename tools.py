@@ -9,6 +9,7 @@ import io
 import zipfile
 from docx import Document
 from docx.shared import Inches
+from typing import Iterable
 
 
 def pdf_to_docx(input_pdf: Path, output_docx: Path, start_page: Optional[int], end_page: Optional[int], overwrite: bool) -> None:
@@ -139,4 +140,48 @@ def pdf_to_docx_raster(input_pdf: Path, output_docx: Path, dpi: int = 200) -> No
 
     doc_pdf.close()
     docx_doc.save(str(output_docx))
+
+
+# --- Conversión por lotes ---
+
+def batch_pdf_to_docx(
+    files: Iterable[Path],
+    out_dir: Path,
+    mode: str = "editable",  # "editable" | "raster"
+    start_page: Optional[int] = None,
+    end_page: Optional[int] = None,
+    overwrite: bool = False,
+    dpi: int = 200,
+) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for f in files:
+        if f.suffix.lower() != ".pdf":
+            continue
+        target = out_dir / (f.stem + ".docx")
+        if mode == "raster":
+            pdf_to_docx_raster(f, target, dpi=dpi)
+        else:
+            pdf_to_docx(f, target, start_page, end_page, overwrite)
+
+
+def batch_docx_to_pdf(
+    files: Iterable[Path],
+    out_dir: Path,
+    overwrite: bool = False,
+) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for f in files:
+        if f.suffix.lower() != ".docx":
+            continue
+        target = out_dir / (f.stem + ".pdf")
+        docx_to_pdf(f, target, overwrite)
+
+
+def scan_files(directory: Path) -> tuple[list[Path], list[Path]]:
+    """Devuelve listas de PDFs y DOCXs en la carpeta (no recursivo)."""
+    if not directory.exists() or not directory.is_dir():
+        raise FileNotFoundError(f"No existe la carpeta: {directory}")
+    pdfs = sorted(directory.glob("*.pdf"))
+    docxs = sorted(directory.glob("*.docx"))
+    return pdfs, docxs
  
