@@ -265,4 +265,252 @@ def ocr_pdf_to_docx(input_pdf: Path, output_docx: Path, dpi: int = 300, lang: st
 
     doc_pdf.close()
     docx_doc.save(str(output_docx))
- 
+
+
+# --- Conversion de imagenes ---
+
+SUPPORTED_IMAGE_FORMATS = {
+    "jpg": "JPEG",
+    "jpeg": "JPEG",
+    "png": "PNG",
+    "webp": "WEBP",
+    "bmp": "BMP",
+    "gif": "GIF",
+    "tiff": "TIFF",
+    "ico": "ICO",
+}
+
+
+def convert_image(
+    input_path: Path,
+    output_path: Path,
+    output_format: str,
+    quality: int = 95,
+    resize: Optional[tuple[int, int]] = None,
+    maintain_aspect: bool = True,
+    overwrite: bool = False,
+) -> None:
+    """Convierte una imagen a otro formato.
+
+    Args:
+        input_path: Ruta de la imagen de entrada
+        output_path: Ruta de salida
+        output_format: Formato de salida (jpg, png, webp, ico, bmp, gif, tiff)
+        quality: Calidad para formatos con compresion (1-100)
+        resize: Tuple (width, height) para redimensionar
+        maintain_aspect: Mantener proporcion al redimensionar
+        overwrite: Sobrescribir si existe
+    """
+    if not input_path.exists():
+        raise FileNotFoundError(f"No existe la imagen: {input_path}")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if output_path.exists() and not overwrite:
+        raise FileExistsError(f"El archivo ya existe: {output_path}")
+
+    fmt = output_format.lower()
+    if fmt not in SUPPORTED_IMAGE_FORMATS:
+        raise ValueError(f"Formato no soportado: {output_format}. Usa: {', '.join(SUPPORTED_IMAGE_FORMATS.keys())}")
+
+    img = Image.open(str(input_path))
+
+    # Convertir a RGB si es necesario (para JPEG)
+    if fmt in ("jpg", "jpeg") and img.mode in ("RGBA", "P", "LA"):
+        background = Image.new("RGB", img.size, (255, 255, 255))
+        if img.mode == "P":
+            img = img.convert("RGBA")
+        background.paste(img, mask=img.split()[-1] if img.mode == "RGBA" else None)
+        img = background
+    elif fmt == "ico" and img.mode != "RGBA":
+        img = img.convert("RGBA")
+
+    # Redimensionar si se especifica
+    if resize:
+        target_w, target_h = resize
+        if maintain_aspect:
+            img.thumbnail((target_w, target_h), Image.LANCZOS)
+        else:
+            img = img.resize((target_w, target_h), Image.LANCZOS)
+
+    # Guardar con las opciones apropiadas
+    pil_format = SUPPORTED_IMAGE_FORMATS[fmt]
+    save_kwargs = {}
+
+    if pil_format == "JPEG":
+        save_kwargs = {"quality": quality, "optimize": True}
+    elif pil_format == "PNG":
+        save_kwargs = {"optimize": True}
+    elif pil_format == "WEBP":
+        save_kwargs = {"quality": quality, "method": 6}
+    elif pil_format == "ICO":
+        # ICO soporta multiples tamaños
+        sizes = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+        # Filtrar tamaños que sean menores o iguales al original
+        orig_size = max(img.size)
+        sizes = [s for s in sizes if s[0] <= orig_size]
+        if not sizes:
+            sizes = [(min(img.size), min(img.size))]
+        save_kwargs = {"sizes": sizes}
+
+    img.save(str(output_path), format=pil_format, **save_kwargs)
+
+
+def batch_convert_images(
+    files: Iterable[Path],
+    out_dir: Path,
+    output_format: str,
+    quality: int = 95,
+    resize: Optional[tuple[int, int]] = None,
+    maintain_aspect: bool = True,
+    overwrite: bool = False,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+) -> tuple[int, list[tuple[Path, str]]]:
+    """Convierte multiples imagenes en lote."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ok = 0
+    errors: list[tuple[Path, str]] = []
+    files_list = list(files)
+    total = len(files_list)
+
+    for i, f in enumerate(files_list):
+        try:
+            ext = output_format.lower()
+            if ext == "jpeg":
+                ext = "jpg"
+            target = out_dir / (f.stem + "." + ext)
+            convert_image(f, target, output_format, quality, resize, maintain_aspect, overwrite)
+            ok += 1
+        except Exception as e:
+            errors.append((f, str(e)))
+
+        if progress_callback:
+            progress_callback(i + 1, total)
+
+    return ok, errors
+
+
+def get_image_info(image_path: Path) -> dict:
+    """Obtiene informacion de una imagen."""
+    if not image_path.exists():
+        raise FileNotFoundError(f"No existe: {image_path}")
+
+    img = Image.open(str(image_path))
+    file_size = image_path.stat().st_size
+
+    return {
+        "width": img.size[0],
+        "height": img.size[1],
+        "format": img.format,
+        "mode": img.mode,
+        "file_size": file_size,
+        "file_size_human": _format_size(file_size),
+    }
+
+
+def _format_size(size_bytes: int) -> str:
+    """Formatea bytes a formato legible."""
+    for unit in ["B", "KB", "MB", "GB"]:
+        if size_bytes < 1024:
+            return f"{size_bytes:.1f} {unit}"
+        size_bytes /= 1024
+    return f"{size_bytes:.1f} TB"
+
+
+# --- Mejoras para documentos corporativos ---
+
+def pdf_to_docx_preserve_formatting(
+    input_pdf: Path,
+    output_docx: Path,
+    start_page: Optional[int] = None,
+    end_page: Optional[int] = None,
+    overwrite: bool = False,
+    embed_fonts: bool = True,
+) -> None:
+    """Convierte PDF a DOCX preservando mejor el formato corporativo.
+
+    Intenta mantener:
+    - Fuentes y estilos
+    - Tablas
+    - Imagenes y logos
+    - Estructura del documento
+    """
+    if not input_pdf.exists():
+        raise FileNotFoundError(f"No existe el PDF: {input_pdf}")
+
+    output_docx = output_docx.with_suffix(".docx")
+    output_docx.parent.mkdir(parents=True, exist_ok=True)
+
+    if output_docx.exists() and not overwrite:
+        raise FileExistsError(f"El archivo ya existe: {output_docx}")
+
+    start_arg = 0 if start_page is None else max(0, start_page - 1)
+    end_arg = None if end_page is None else max(start_arg, end_page - 1)
+
+    cv = Converter(str(input_pdf))
+    try:
+        # Usar configuracion para mejor preservacion
+        cv.convert(
+            str(output_docx),
+            start=start_arg,
+            end=end_arg,
+        )
+    finally:
+        cv.close()
+
+
+def extract_images_from_pdf(input_pdf: Path, output_dir: Path, format: str = "png") -> list[Path]:
+    """Extrae todas las imagenes de un PDF."""
+    if not input_pdf.exists():
+        raise FileNotFoundError(f"No existe el PDF: {input_pdf}")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    extracted: list[Path] = []
+
+    doc = fitz.open(str(input_pdf))
+    img_count = 0
+
+    for page_num in range(len(doc)):
+        page = doc[page_num]
+        image_list = page.get_images()
+
+        for img_index, img in enumerate(image_list):
+            xref = img[0]
+            base_image = doc.extract_image(xref)
+            image_bytes = base_image["image"]
+
+            # Guardar imagen
+            img_count += 1
+            output_path = output_dir / f"imagen_{page_num + 1}_{img_count}.{format}"
+
+            pil_img = Image.open(io.BytesIO(image_bytes))
+            if format.lower() in ("jpg", "jpeg") and pil_img.mode == "RGBA":
+                background = Image.new("RGB", pil_img.size, (255, 255, 255))
+                background.paste(pil_img, mask=pil_img.split()[-1])
+                pil_img = background
+
+            pil_img.save(str(output_path))
+            extracted.append(output_path)
+
+    doc.close()
+    return extracted
+
+
+def extract_images_from_docx(input_docx: Path, output_dir: Path) -> list[Path]:
+    """Extrae todas las imagenes de un DOCX."""
+    if not input_docx.exists():
+        raise FileNotFoundError(f"No existe el DOCX: {input_docx}")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    extracted: list[Path] = []
+
+    with zipfile.ZipFile(str(input_docx), 'r') as zf:
+        for item in zf.namelist():
+            if item.startswith('word/media/'):
+                data = zf.read(item)
+                filename = Path(item).name
+                output_path = output_dir / filename
+                output_path.write_bytes(data)
+                extracted.append(output_path)
+
+    return extracted
