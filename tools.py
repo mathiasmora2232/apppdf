@@ -10,6 +10,8 @@ import zipfile
 from docx import Document
 from docx.shared import Inches
 from typing import Iterable
+import pytesseract
+import shutil
 
 
 def pdf_to_docx(input_pdf: Path, output_docx: Path, start_page: Optional[int], end_page: Optional[int], overwrite: bool) -> None:
@@ -207,4 +209,57 @@ def scan_files(directory: Path) -> tuple[list[Path], list[Path]]:
     pdfs = sorted(directory.glob("*.pdf"))
     docxs = sorted(directory.glob("*.docx"))
     return pdfs, docxs
+
+
+# --- OCR: PDF (imagen) → DOCX (texto) ---
+
+def _ensure_tesseract_available() -> str:
+    """Detecta el ejecutable de Tesseract en Windows y configura pytesseract."""
+    candidates = [
+        shutil.which("tesseract"),
+        r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe",
+        r"C:\\Program Files (x86)\\Tesseract-OCR\\tesseract.exe",
+    ]
+    for path in candidates:
+        if path and Path(path).exists():
+            pytesseract.pytesseract.tesseract_cmd = path
+            return path
+    raise FileNotFoundError(
+        "No se encontró Tesseract OCR. Instálalo desde https://github.com/tesseract-ocr/tesseract o el instalador de Windows."
+    )
+
+
+def ocr_pdf_to_docx(input_pdf: Path, output_docx: Path, dpi: int = 300, lang: str = "spa") -> None:
+    """Realiza OCR sobre cada página del PDF y escribe el texto en un DOCX.
+    - dpi: resolución para render de páginas
+    - lang: código del idioma (ej.: 'spa' español, 'eng' inglés, 'spa+eng' mixto)
+    """
+    if not input_pdf.exists():
+        raise FileNotFoundError(f"No existe el PDF: {input_pdf}")
+
+    _ensure_tesseract_available()
+
+    output_docx = output_docx.with_suffix(".docx")
+    output_docx.parent.mkdir(parents=True, exist_ok=True)
+
+    doc_pdf = fitz.open(str(input_pdf))
+    docx_doc = Document()
+
+    for i in range(len(doc_pdf)):
+        page = doc_pdf[i]
+        zoom = dpi / 72.0
+        mat = fitz.Matrix(zoom, zoom)
+        pix = page.get_pixmap(matrix=mat, alpha=False)
+        img_bytes = pix.tobytes("png")
+        pil_img = Image.open(io.BytesIO(img_bytes))
+
+        text = pytesseract.image_to_string(pil_img, lang=lang)
+        # Agregamos texto preservando saltos de línea básicos
+        for line in text.splitlines():
+            docx_doc.add_paragraph(line)
+        if i < len(doc_pdf) - 1:
+            docx_doc.add_page_break()
+
+    doc_pdf.close()
+    docx_doc.save(str(output_docx))
  

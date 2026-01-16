@@ -11,6 +11,7 @@ from tools import (
     batch_pdf_to_docx,
     batch_docx_to_pdf,
     scan_files,
+    ocr_pdf_to_docx,
 )
 
 
@@ -35,6 +36,13 @@ def build_parser() -> argparse.ArgumentParser:
     p1r.add_argument("-o", "--output", help="Ruta del DOCX de salida")
     p1r.add_argument("--dpi", type=int, default=200, help="Resolución de render (por defecto 200 DPI)")
     p1r.add_argument("--overwrite", action="store_true", help="Sobrescribe si el DOCX existe")
+
+    # ocr-pdf2docx
+    pocr = sub.add_parser("ocr-pdf2docx", help="OCR: PDF (imagen) → DOCX (texto)")
+    pocr.add_argument("input", help="Ruta al PDF")
+    pocr.add_argument("-o", "--output", help="Ruta del DOCX de salida")
+    pocr.add_argument("--dpi", type=int, default=300, help="DPI para render de páginas")
+    pocr.add_argument("--lang", default="spa", help="Idioma Tesseract, ej.: spa, eng, spa+eng")
 
     # docx2pdf
     p2 = sub.add_parser("docx2pdf", help="Convertir DOCX a PDF")
@@ -84,6 +92,12 @@ def main():
         dpi = getattr(args, 'dpi', 200)
         pdf_to_docx_raster(inp, out, dpi=dpi, overwrite=args.overwrite)
         print(f"Conversión (raster) completada: {out}")
+
+    elif args.cmd == "ocr-pdf2docx":
+        inp = Path(args.input)
+        out = Path(args.output) if args.output else inp.with_suffix(".docx")
+        ocr_pdf_to_docx(inp, out, dpi=args.dpi, lang=args.lang)
+        print(f"OCR completado (texto): {out}")
 
     elif args.cmd == "docx2pdf":
         inp = Path(args.input)
