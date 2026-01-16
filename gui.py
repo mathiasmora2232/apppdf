@@ -1,139 +1,329 @@
 import threading
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+import customtkinter as ctk
+from tkinter import filedialog, messagebox
 from pathlib import Path
 from typing import Optional
 
-from tools import pdf_to_docx, docx_to_pdf, compress_pdf, compress_docx_images
+from tools import (
+    pdf_to_docx, docx_to_pdf, compress_pdf, compress_docx_images,
+    pdf_to_docx_raster, ocr_pdf_to_docx
+)
+
+# Configurar apariencia
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
 
 
-class Pdf2WordApp(tk.Tk):
+class Pdf2WordApp(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("PDF → Word (DOCX)")
-        self.geometry("760x520")
-        self.resizable(False, False)
+        self.title("PDF Converter Pro")
+        self.geometry("900x650")
+        self.minsize(800, 600)
 
-        # Tema más amable
-        style = ttk.Style()
-        try:
-            style.theme_use("vista")
-        except Exception:
-            style.theme_use("clam")
-        style.configure("TLabel", font=("Segoe UI", 10))
-        style.configure("TButton", font=("Segoe UI", 10))
-        style.configure("TEntry", padding=2)
+        # Variables de estado - PDF->DOCX
+        self.var_input = ctk.StringVar()
+        self.var_output = ctk.StringVar()
+        self.var_start = ctk.StringVar()
+        self.var_end = ctk.StringVar()
+        self.var_overwrite = ctk.BooleanVar(value=False)
+        self.var_raster_on = ctk.BooleanVar(value=False)
+        self.var_raster_dpi = ctk.IntVar(value=200)
+        self.var_ocr_lang = ctk.StringVar(value="spa")
+        self.var_ocr_dpi = ctk.IntVar(value=300)
 
-        # Variables de estado
-        self.var_input = tk.StringVar()
-        self.var_output = tk.StringVar()
-        self.var_start = tk.StringVar()
-        self.var_end = tk.StringVar()
-        self.var_overwrite = tk.BooleanVar(value=False)
+        # Variables - DOCX->PDF
+        self.var_docx_in = ctk.StringVar()
+        self.var_pdf_out = ctk.StringVar()
+        self.var_docx_overwrite = ctk.BooleanVar(value=False)
 
-        # Para DOCX->PDF
-        self.var_docx_in = tk.StringVar()
-        self.var_pdf_out = tk.StringVar()
-        self.var_docx_overwrite = tk.BooleanVar(value=False)
+        # Variables - Compresion
+        self.var_pdf_comp_in = ctk.StringVar()
+        self.var_pdf_comp_out = ctk.StringVar()
+        self.var_docx_comp_in = ctk.StringVar()
+        self.var_docx_comp_out = ctk.StringVar()
+        self.var_quality = ctk.IntVar(value=75)
+        self.var_max_w = ctk.IntVar(value=0)
+        self.var_max_h = ctk.IntVar(value=0)
 
-        # Para compresión
-        self.var_pdf_comp_in = tk.StringVar()
-        self.var_pdf_comp_out = tk.StringVar()
-        self.var_docx_comp_in = tk.StringVar()
-        self.var_docx_comp_out = tk.StringVar()
-        self.var_quality = tk.IntVar(value=75)
-        self.var_max_w = tk.IntVar(value=0)
-        self.var_max_h = tk.IntVar(value=0)
+        # Variables - Lotes
+        self.var_outdir_batch = ctk.StringVar()
+        self.var_batch_pdf2docx = ctk.BooleanVar(value=True)
+        self.var_batch_raster = ctk.BooleanVar(value=False)
+        self.var_batch_docx2pdf = ctk.BooleanVar(value=False)
+        self.var_batch_overwrite = ctk.BooleanVar(value=True)
+        self.var_batch_dpi = ctk.IntVar(value=200)
 
         self._build_ui()
 
     def _build_ui(self) -> None:
-        pad = {"padx": 10, "pady": 6}
+        # Header
+        header_frame = ctk.CTkFrame(self, fg_color="transparent")
+        header_frame.pack(fill="x", padx=20, pady=(20, 10))
 
-        notebook = ttk.Notebook(self)
-        notebook.pack(fill=tk.BOTH, expand=True)
+        title_label = ctk.CTkLabel(
+            header_frame,
+            text="PDF Converter Pro",
+            font=ctk.CTkFont(size=28, weight="bold")
+        )
+        title_label.pack(side="left")
 
-        # --- Tab PDF->DOCX ---
-        tab1 = ttk.Frame(notebook)
-        notebook.add(tab1, text="PDF → DOCX")
-        ttk.Label(tab1, text="Archivo PDF:").grid(row=0, column=0, sticky=tk.W, **pad)
-        ttk.Entry(tab1, textvariable=self.var_input, width=56).grid(row=0, column=1, sticky=tk.W, **pad)
-        ttk.Button(tab1, text="Examinar…", command=self.on_browse_pdf).grid(row=0, column=2, **pad)
-        ttk.Label(tab1, text="Salida DOCX (opcional):").grid(row=1, column=0, sticky=tk.W, **pad)
-        ttk.Entry(tab1, textvariable=self.var_output, width=56).grid(row=1, column=1, sticky=tk.W, **pad)
-        ttk.Button(tab1, text="Guardar como…", command=self.on_browse_docx).grid(row=1, column=2, **pad)
-        ttk.Label(tab1, text="Página inicio (1-basado):").grid(row=2, column=0, sticky=tk.W, **pad)
-        ttk.Entry(tab1, textvariable=self.var_start, width=12).grid(row=2, column=1, sticky=tk.W, **pad)
-        ttk.Label(tab1, text="Página fin (1-basado):").grid(row=3, column=0, sticky=tk.W, **pad)
-        ttk.Entry(tab1, textvariable=self.var_end, width=12).grid(row=3, column=1, sticky=tk.W, **pad)
-        ttk.Checkbutton(tab1, text="Sobrescribir si existe", variable=self.var_overwrite).grid(row=4, column=1, sticky=tk.W, **pad)
-        ttk.Button(tab1, text="Convertir (editable)", command=self.on_convert_pdf2docx).grid(row=5, column=2, sticky=tk.E, **pad)
+        # Theme toggle
+        self.theme_switch = ctk.CTkSwitch(
+            header_frame,
+            text="Modo Oscuro",
+            command=self._toggle_theme,
+            onvalue="dark",
+            offvalue="light"
+        )
+        self.theme_switch.select()
+        self.theme_switch.pack(side="right", padx=10)
 
-        # Modo fidelidad exacta (raster)
-        self.var_raster_on = tk.BooleanVar(value=False)
-        ttk.Checkbutton(tab1, text="Fidelidad exacta (imagen)", variable=self.var_raster_on).grid(row=6, column=1, sticky=tk.W, **pad)
-        ttk.Label(tab1, text="DPI:").grid(row=6, column=0, sticky=tk.W, **pad)
-        self.var_raster_dpi = tk.IntVar(value=200)
-        ttk.Entry(tab1, textvariable=self.var_raster_dpi, width=8).grid(row=6, column=1, sticky=tk.W, padx=120)
-        ttk.Button(tab1, text="Convertir (imagen)", command=self.on_convert_pdf2docx_raster).grid(row=7, column=2, sticky=tk.E, **pad)
+        # Tabview principal
+        self.tabview = ctk.CTkTabview(self, corner_radius=10)
+        self.tabview.pack(fill="both", expand=True, padx=20, pady=10)
 
-        # OCR (texto)
-        ttk.Separator(tab1).grid(row=8, column=0, columnspan=3, sticky="ew", **pad)
-        ttk.Label(tab1, text="OCR idioma (ej.: spa, eng, spa+eng):").grid(row=9, column=0, sticky=tk.W, **pad)
-        self.var_ocr_lang = tk.StringVar(value="spa")
-        ttk.Entry(tab1, textvariable=self.var_ocr_lang, width=20).grid(row=9, column=1, sticky=tk.W, **pad)
-        ttk.Label(tab1, text="OCR DPI:").grid(row=10, column=0, sticky=tk.W, **pad)
-        self.var_ocr_dpi = tk.IntVar(value=300)
-        ttk.Entry(tab1, textvariable=self.var_ocr_dpi, width=10).grid(row=10, column=1, sticky=tk.W, **pad)
-        ttk.Button(tab1, text="Convertir (OCR texto)", command=self.on_convert_pdf2docx_ocr).grid(row=11, column=2, sticky=tk.E, **pad)
+        # Crear tabs
+        tab1 = self.tabview.add("PDF → DOCX")
+        tab2 = self.tabview.add("DOCX → PDF")
+        tab3 = self.tabview.add("Compresion")
+        tab4 = self.tabview.add("Lotes")
 
-        # --- Tab DOCX->PDF ---
-        tab2 = ttk.Frame(notebook)
-        notebook.add(tab2, text="DOCX → PDF")
-        ttk.Label(tab2, text="Archivo DOCX:").grid(row=0, column=0, sticky=tk.W, **pad)
-        ttk.Entry(tab2, textvariable=self.var_docx_in, width=56).grid(row=0, column=1, sticky=tk.W, **pad)
-        ttk.Button(tab2, text="Examinar…", command=self.on_browse_docx_in).grid(row=0, column=2, **pad)
-        ttk.Label(tab2, text="Salida PDF (opcional):").grid(row=1, column=0, sticky=tk.W, **pad)
-        ttk.Entry(tab2, textvariable=self.var_pdf_out, width=56).grid(row=1, column=1, sticky=tk.W, **pad)
-        ttk.Button(tab2, text="Guardar como…", command=self.on_browse_pdf_out).grid(row=1, column=2, **pad)
-        ttk.Checkbutton(tab2, text="Sobrescribir si existe", variable=self.var_docx_overwrite).grid(row=2, column=1, sticky=tk.W, **pad)
-        ttk.Button(tab2, text="Convertir", command=self.on_convert_docx2pdf).grid(row=3, column=2, sticky=tk.E, **pad)
+        self._build_pdf2docx_tab(tab1)
+        self._build_docx2pdf_tab(tab2)
+        self._build_compression_tab(tab3)
+        self._build_batch_tab(tab4)
 
-        # --- Tab Compresión ---
-        tab3 = ttk.Frame(notebook)
-        notebook.add(tab3, text="Compresión")
-        ttk.Label(tab3, text="PDF a optimizar:").grid(row=0, column=0, sticky=tk.W, **pad)
-        ttk.Entry(tab3, textvariable=self.var_pdf_comp_in, width=56).grid(row=0, column=1, sticky=tk.W, **pad)
-        ttk.Button(tab3, text="Examinar…", command=self.on_browse_pdf_comp_in).grid(row=0, column=2, **pad)
-        ttk.Label(tab3, text="PDF optimizado:").grid(row=1, column=0, sticky=tk.W, **pad)
-        ttk.Entry(tab3, textvariable=self.var_pdf_comp_out, width=56).grid(row=1, column=1, sticky=tk.W, **pad)
-        ttk.Button(tab3, text="Guardar como…", command=self.on_browse_pdf_comp_out).grid(row=1, column=2, **pad)
-        ttk.Button(tab3, text="Optimizar PDF", command=self.on_compress_pdf).grid(row=2, column=2, sticky=tk.E, **pad)
+        # Status bar
+        self._build_status_bar()
 
-        ttk.Separator(tab3).grid(row=3, column=0, columnspan=3, sticky="ew", **pad)
+    def _build_pdf2docx_tab(self, parent) -> None:
+        # Frame principal con scroll
+        main_frame = ctk.CTkScrollableFrame(parent, fg_color="transparent")
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        ttk.Label(tab3, text="DOCX a comprimir:").grid(row=4, column=0, sticky=tk.W, **pad)
-        ttk.Entry(tab3, textvariable=self.var_docx_comp_in, width=56).grid(row=4, column=1, sticky=tk.W, **pad)
-        ttk.Button(tab3, text="Examinar…", command=self.on_browse_docx_comp_in).grid(row=4, column=2, **pad)
-        ttk.Label(tab3, text="DOCX comprimido:").grid(row=5, column=0, sticky=tk.W, **pad)
-        ttk.Entry(tab3, textvariable=self.var_docx_comp_out, width=56).grid(row=5, column=1, sticky=tk.W, **pad)
-        ttk.Button(tab3, text="Guardar como…", command=self.on_browse_docx_comp_out).grid(row=5, column=2, **pad)
-        ttk.Label(tab3, text="Calidad JPEG (1-95):").grid(row=6, column=0, sticky=tk.W, **pad)
-        ttk.Entry(tab3, textvariable=self.var_quality, width=12).grid(row=6, column=1, sticky=tk.W, **pad)
-        ttk.Label(tab3, text="Ancho máx:").grid(row=7, column=0, sticky=tk.W, **pad)
-        ttk.Entry(tab3, textvariable=self.var_max_w, width=12).grid(row=7, column=1, sticky=tk.W, **pad)
-        ttk.Label(tab3, text="Alto máx:").grid(row=8, column=0, sticky=tk.W, **pad)
-        ttk.Entry(tab3, textvariable=self.var_max_h, width=12).grid(row=8, column=1, sticky=tk.W, **pad)
-        ttk.Button(tab3, text="Comprimir DOCX", command=self.on_compress_docx).grid(row=9, column=2, sticky=tk.E, **pad)
+        # Seccion: Archivo de entrada
+        self._create_section_label(main_frame, "Archivo de Entrada")
 
-        # Barra de estado
-        status_frame = ttk.Frame(self)
-        status_frame.pack(fill=tk.X, padx=10, pady=6)
-        self.progress = ttk.Progressbar(status_frame, length=200, mode="determinate")
-        self.progress.pack(side=tk.RIGHT)
-        self.lbl_status = ttk.Label(status_frame, text="Listo", foreground="#444")
-        self.lbl_status.pack(side=tk.LEFT)
+        input_frame = ctk.CTkFrame(main_frame, fg_color=("gray90", "gray17"))
+        input_frame.pack(fill="x", pady=(0, 15))
+        input_frame.grid_columnconfigure(1, weight=1)
 
+        ctk.CTkLabel(input_frame, text="PDF:", width=100, anchor="w").grid(row=0, column=0, padx=15, pady=12)
+        ctk.CTkEntry(input_frame, textvariable=self.var_input, placeholder_text="Selecciona un archivo PDF...").grid(row=0, column=1, padx=5, pady=12, sticky="ew")
+        ctk.CTkButton(input_frame, text="Examinar", width=100, command=self.on_browse_pdf).grid(row=0, column=2, padx=15, pady=12)
+
+        ctk.CTkLabel(input_frame, text="Salida DOCX:", width=100, anchor="w").grid(row=1, column=0, padx=15, pady=12)
+        ctk.CTkEntry(input_frame, textvariable=self.var_output, placeholder_text="Opcional - se genera automaticamente").grid(row=1, column=1, padx=5, pady=12, sticky="ew")
+        ctk.CTkButton(input_frame, text="Guardar como", width=100, command=self.on_browse_docx).grid(row=1, column=2, padx=15, pady=12)
+
+        # Seccion: Opciones de paginas
+        self._create_section_label(main_frame, "Rango de Paginas (opcional)")
+
+        pages_frame = ctk.CTkFrame(main_frame, fg_color=("gray90", "gray17"))
+        pages_frame.pack(fill="x", pady=(0, 15))
+
+        ctk.CTkLabel(pages_frame, text="Pagina inicio:", width=100).pack(side="left", padx=15, pady=12)
+        ctk.CTkEntry(pages_frame, textvariable=self.var_start, width=80, placeholder_text="1").pack(side="left", padx=5, pady=12)
+        ctk.CTkLabel(pages_frame, text="Pagina fin:", width=100).pack(side="left", padx=15, pady=12)
+        ctk.CTkEntry(pages_frame, textvariable=self.var_end, width=80, placeholder_text="Ultima").pack(side="left", padx=5, pady=12)
+        ctk.CTkCheckBox(pages_frame, text="Sobrescribir si existe", variable=self.var_overwrite).pack(side="right", padx=15, pady=12)
+
+        # Seccion: Modo de conversion
+        self._create_section_label(main_frame, "Modo de Conversion")
+
+        mode_frame = ctk.CTkFrame(main_frame, fg_color=("gray90", "gray17"))
+        mode_frame.pack(fill="x", pady=(0, 15))
+        mode_frame.grid_columnconfigure((0, 1, 2), weight=1)
+
+        # Conversion editable
+        edit_card = self._create_card(mode_frame, "Editable", "Texto editable, puede perder formato")
+        edit_card.grid(row=0, column=0, padx=10, pady=15, sticky="nsew")
+        ctk.CTkButton(edit_card, text="Convertir", fg_color="#2196F3", hover_color="#1976D2", command=self.on_convert_pdf2docx).pack(pady=(10, 15), padx=15, fill="x")
+
+        # Conversion imagen (fidelidad exacta)
+        raster_card = self._create_card(mode_frame, "Imagen", "Fidelidad exacta, no editable")
+        raster_card.grid(row=0, column=1, padx=10, pady=15, sticky="nsew")
+        dpi_frame = ctk.CTkFrame(raster_card, fg_color="transparent")
+        dpi_frame.pack(pady=5, padx=15, fill="x")
+        ctk.CTkLabel(dpi_frame, text="DPI:").pack(side="left")
+        ctk.CTkEntry(dpi_frame, textvariable=self.var_raster_dpi, width=60).pack(side="left", padx=5)
+        ctk.CTkButton(raster_card, text="Convertir", fg_color="#4CAF50", hover_color="#388E3C", command=self.on_convert_pdf2docx_raster).pack(pady=(5, 15), padx=15, fill="x")
+
+        # Conversion OCR
+        ocr_card = self._create_card(mode_frame, "OCR", "Extrae texto de imagenes/escaneos")
+        ocr_card.grid(row=0, column=2, padx=10, pady=15, sticky="nsew")
+        lang_frame = ctk.CTkFrame(ocr_card, fg_color="transparent")
+        lang_frame.pack(pady=5, padx=15, fill="x")
+        ctk.CTkLabel(lang_frame, text="Idioma:").pack(side="left")
+        ctk.CTkEntry(lang_frame, textvariable=self.var_ocr_lang, width=80, placeholder_text="spa").pack(side="left", padx=5)
+        dpi_ocr_frame = ctk.CTkFrame(ocr_card, fg_color="transparent")
+        dpi_ocr_frame.pack(pady=5, padx=15, fill="x")
+        ctk.CTkLabel(dpi_ocr_frame, text="DPI:").pack(side="left")
+        ctk.CTkEntry(dpi_ocr_frame, textvariable=self.var_ocr_dpi, width=60).pack(side="left", padx=5)
+        ctk.CTkButton(ocr_card, text="Convertir", fg_color="#FF9800", hover_color="#F57C00", command=self.on_convert_pdf2docx_ocr).pack(pady=(5, 15), padx=15, fill="x")
+
+    def _build_docx2pdf_tab(self, parent) -> None:
+        main_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self._create_section_label(main_frame, "Convertir Word a PDF")
+
+        input_frame = ctk.CTkFrame(main_frame, fg_color=("gray90", "gray17"))
+        input_frame.pack(fill="x", pady=(0, 15))
+        input_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(input_frame, text="DOCX:", width=100, anchor="w").grid(row=0, column=0, padx=15, pady=12)
+        ctk.CTkEntry(input_frame, textvariable=self.var_docx_in, placeholder_text="Selecciona un archivo Word...").grid(row=0, column=1, padx=5, pady=12, sticky="ew")
+        ctk.CTkButton(input_frame, text="Examinar", width=100, command=self.on_browse_docx_in).grid(row=0, column=2, padx=15, pady=12)
+
+        ctk.CTkLabel(input_frame, text="Salida PDF:", width=100, anchor="w").grid(row=1, column=0, padx=15, pady=12)
+        ctk.CTkEntry(input_frame, textvariable=self.var_pdf_out, placeholder_text="Opcional - se genera automaticamente").grid(row=1, column=1, padx=5, pady=12, sticky="ew")
+        ctk.CTkButton(input_frame, text="Guardar como", width=100, command=self.on_browse_pdf_out).grid(row=1, column=2, padx=15, pady=12)
+
+        options_frame = ctk.CTkFrame(main_frame, fg_color=("gray90", "gray17"))
+        options_frame.pack(fill="x", pady=(0, 15))
+        ctk.CTkCheckBox(options_frame, text="Sobrescribir si existe", variable=self.var_docx_overwrite).pack(side="left", padx=15, pady=12)
+        ctk.CTkButton(options_frame, text="Convertir a PDF", width=150, fg_color="#E91E63", hover_color="#C2185B", command=self.on_convert_docx2pdf).pack(side="right", padx=15, pady=12)
+
+        # Info
+        info_frame = ctk.CTkFrame(main_frame, fg_color=("gray85", "gray20"))
+        info_frame.pack(fill="x", pady=20)
+        ctk.CTkLabel(info_frame, text="Nota: Requiere Microsoft Word instalado para una conversion precisa.", text_color=("gray50", "gray60")).pack(pady=15)
+
+    def _build_compression_tab(self, parent) -> None:
+        main_frame = ctk.CTkScrollableFrame(parent, fg_color="transparent")
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Compresion PDF
+        self._create_section_label(main_frame, "Optimizar PDF")
+
+        pdf_frame = ctk.CTkFrame(main_frame, fg_color=("gray90", "gray17"))
+        pdf_frame.pack(fill="x", pady=(0, 20))
+        pdf_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(pdf_frame, text="PDF entrada:", width=120, anchor="w").grid(row=0, column=0, padx=15, pady=12)
+        ctk.CTkEntry(pdf_frame, textvariable=self.var_pdf_comp_in, placeholder_text="PDF a optimizar...").grid(row=0, column=1, padx=5, pady=12, sticky="ew")
+        ctk.CTkButton(pdf_frame, text="Examinar", width=100, command=self.on_browse_pdf_comp_in).grid(row=0, column=2, padx=15, pady=12)
+
+        ctk.CTkLabel(pdf_frame, text="PDF salida:", width=120, anchor="w").grid(row=1, column=0, padx=15, pady=12)
+        ctk.CTkEntry(pdf_frame, textvariable=self.var_pdf_comp_out, placeholder_text="PDF optimizado...").grid(row=1, column=1, padx=5, pady=12, sticky="ew")
+        ctk.CTkButton(pdf_frame, text="Guardar como", width=100, command=self.on_browse_pdf_comp_out).grid(row=1, column=2, padx=15, pady=12)
+
+        ctk.CTkButton(pdf_frame, text="Optimizar PDF", width=150, fg_color="#9C27B0", hover_color="#7B1FA2", command=self.on_compress_pdf).grid(row=2, column=2, padx=15, pady=15)
+
+        # Compresion DOCX
+        self._create_section_label(main_frame, "Comprimir Imagenes en DOCX")
+
+        docx_frame = ctk.CTkFrame(main_frame, fg_color=("gray90", "gray17"))
+        docx_frame.pack(fill="x", pady=(0, 15))
+        docx_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(docx_frame, text="DOCX entrada:", width=120, anchor="w").grid(row=0, column=0, padx=15, pady=12)
+        ctk.CTkEntry(docx_frame, textvariable=self.var_docx_comp_in, placeholder_text="DOCX a comprimir...").grid(row=0, column=1, padx=5, pady=12, sticky="ew")
+        ctk.CTkButton(docx_frame, text="Examinar", width=100, command=self.on_browse_docx_comp_in).grid(row=0, column=2, padx=15, pady=12)
+
+        ctk.CTkLabel(docx_frame, text="DOCX salida:", width=120, anchor="w").grid(row=1, column=0, padx=15, pady=12)
+        ctk.CTkEntry(docx_frame, textvariable=self.var_docx_comp_out, placeholder_text="DOCX comprimido...").grid(row=1, column=1, padx=5, pady=12, sticky="ew")
+        ctk.CTkButton(docx_frame, text="Guardar como", width=100, command=self.on_browse_docx_comp_out).grid(row=1, column=2, padx=15, pady=12)
+
+        # Opciones de compresion
+        options_frame = ctk.CTkFrame(docx_frame, fg_color="transparent")
+        options_frame.grid(row=2, column=0, columnspan=3, padx=15, pady=10, sticky="ew")
+
+        ctk.CTkLabel(options_frame, text="Calidad JPEG (1-95):").pack(side="left", padx=(0, 5))
+        ctk.CTkEntry(options_frame, textvariable=self.var_quality, width=60).pack(side="left", padx=5)
+
+        ctk.CTkLabel(options_frame, text="Ancho max:").pack(side="left", padx=(20, 5))
+        ctk.CTkEntry(options_frame, textvariable=self.var_max_w, width=60, placeholder_text="0=auto").pack(side="left", padx=5)
+
+        ctk.CTkLabel(options_frame, text="Alto max:").pack(side="left", padx=(20, 5))
+        ctk.CTkEntry(options_frame, textvariable=self.var_max_h, width=60, placeholder_text="0=auto").pack(side="left", padx=5)
+
+        ctk.CTkButton(docx_frame, text="Comprimir DOCX", width=150, fg_color="#009688", hover_color="#00796B", command=self.on_compress_docx).grid(row=3, column=2, padx=15, pady=15)
+
+    def _build_batch_tab(self, parent) -> None:
+        main_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self._create_section_label(main_frame, "Conversion por Lotes")
+
+        # Lista de archivos
+        list_frame = ctk.CTkFrame(main_frame, fg_color=("gray90", "gray17"))
+        list_frame.pack(fill="both", expand=True, pady=(0, 15))
+
+        # Textbox como lista (CTkTextbox para mostrar archivos)
+        self.file_listbox = ctk.CTkTextbox(list_frame, height=200)
+        self.file_listbox.pack(fill="both", expand=True, padx=15, pady=15)
+        self.file_listbox.configure(state="disabled")
+        self.batch_files: list[Path] = []
+
+        # Botones de archivo
+        btn_frame = ctk.CTkFrame(list_frame, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=15, pady=(0, 15))
+        ctk.CTkButton(btn_frame, text="Agregar PDFs", width=120, command=self.on_add_pdfs).pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="Agregar DOCXs", width=120, command=self.on_add_docxs).pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="Limpiar Lista", width=120, fg_color="#F44336", hover_color="#D32F2F", command=self.on_clear_list).pack(side="left", padx=5)
+
+        # Carpeta de salida
+        output_frame = ctk.CTkFrame(main_frame, fg_color=("gray90", "gray17"))
+        output_frame.pack(fill="x", pady=(0, 15))
+        output_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(output_frame, text="Carpeta salida:", width=120, anchor="w").grid(row=0, column=0, padx=15, pady=12)
+        ctk.CTkEntry(output_frame, textvariable=self.var_outdir_batch, placeholder_text="Carpeta donde guardar los archivos...").grid(row=0, column=1, padx=5, pady=12, sticky="ew")
+        ctk.CTkButton(output_frame, text="Elegir", width=100, command=self.on_choose_outdir_batch).grid(row=0, column=2, padx=15, pady=12)
+
+        # Opciones
+        options_frame = ctk.CTkFrame(main_frame, fg_color=("gray90", "gray17"))
+        options_frame.pack(fill="x", pady=(0, 15))
+
+        checks_frame = ctk.CTkFrame(options_frame, fg_color="transparent")
+        checks_frame.pack(fill="x", padx=15, pady=12)
+
+        ctk.CTkCheckBox(checks_frame, text="PDF → DOCX", variable=self.var_batch_pdf2docx).pack(side="left", padx=10)
+        ctk.CTkCheckBox(checks_frame, text="Modo Imagen", variable=self.var_batch_raster).pack(side="left", padx=10)
+        ctk.CTkCheckBox(checks_frame, text="DOCX → PDF", variable=self.var_batch_docx2pdf).pack(side="left", padx=10)
+        ctk.CTkCheckBox(checks_frame, text="Sobrescribir", variable=self.var_batch_overwrite).pack(side="left", padx=10)
+
+        dpi_frame = ctk.CTkFrame(options_frame, fg_color="transparent")
+        dpi_frame.pack(fill="x", padx=15, pady=(0, 12))
+        ctk.CTkLabel(dpi_frame, text="DPI (modo imagen):").pack(side="left")
+        ctk.CTkEntry(dpi_frame, textvariable=self.var_batch_dpi, width=60).pack(side="left", padx=10)
+
+        ctk.CTkButton(options_frame, text="Iniciar Conversion", width=180, height=40, fg_color="#4CAF50", hover_color="#388E3C", font=ctk.CTkFont(size=14, weight="bold"), command=self.on_run_batch).pack(side="right", padx=15, pady=12)
+
+    def _build_status_bar(self) -> None:
+        status_frame = ctk.CTkFrame(self, height=50, fg_color=("gray85", "gray20"))
+        status_frame.pack(fill="x", padx=20, pady=(0, 20))
+        status_frame.pack_propagate(False)
+
+        self.lbl_status = ctk.CTkLabel(status_frame, text="Listo", font=ctk.CTkFont(size=12))
+        self.lbl_status.pack(side="left", padx=20, pady=10)
+
+        self.progress = ctk.CTkProgressBar(status_frame, width=200)
+        self.progress.pack(side="right", padx=20, pady=10)
+        self.progress.set(0)
+
+    def _create_section_label(self, parent, text: str) -> None:
+        ctk.CTkLabel(parent, text=text, font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", pady=(10, 5))
+
+    def _create_card(self, parent, title: str, description: str) -> ctk.CTkFrame:
+        card = ctk.CTkFrame(parent, fg_color=("gray85", "gray20"), corner_radius=10)
+        ctk.CTkLabel(card, text=title, font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(15, 5))
+        ctk.CTkLabel(card, text=description, font=ctk.CTkFont(size=11), text_color=("gray50", "gray60")).pack(pady=(0, 5))
+        return card
+
+    def _toggle_theme(self) -> None:
+        mode = ctk.get_appearance_mode()
+        if mode == "Dark":
+            ctk.set_appearance_mode("light")
+            self.theme_switch.deselect()
+        else:
+            ctk.set_appearance_mode("dark")
+            self.theme_switch.select()
+
+    # --- File browsers ---
     def on_browse_pdf(self) -> None:
         path = filedialog.askopenfilename(
             title="Seleccionar PDF",
@@ -141,7 +331,6 @@ class Pdf2WordApp(tk.Tk):
         )
         if path:
             self.var_input.set(path)
-            # Proponer salida por defecto
             stem = Path(path).with_suffix(".docx")
             if not self.var_output.get():
                 self.var_output.set(str(stem))
@@ -155,6 +344,43 @@ class Pdf2WordApp(tk.Tk):
         if path:
             self.var_output.set(path)
 
+    def on_browse_docx_in(self) -> None:
+        path = filedialog.askopenfilename(title="Seleccionar DOCX", filetypes=[("Documento Word", "*.docx")])
+        if path:
+            self.var_docx_in.set(path)
+            if not self.var_pdf_out.get():
+                self.var_pdf_out.set(str(Path(path).with_suffix('.pdf')))
+
+    def on_browse_pdf_out(self) -> None:
+        path = filedialog.asksaveasfilename(title="Guardar como PDF", defaultextension=".pdf", filetypes=[("PDF", "*.pdf")])
+        if path:
+            self.var_pdf_out.set(path)
+
+    def on_browse_pdf_comp_in(self) -> None:
+        path = filedialog.askopenfilename(title="Seleccionar PDF", filetypes=[("PDF", "*.pdf")])
+        if path:
+            self.var_pdf_comp_in.set(path)
+            if not self.var_pdf_comp_out.get():
+                self.var_pdf_comp_out.set(str(Path(path).with_name(Path(path).stem + '_optimized.pdf')))
+
+    def on_browse_pdf_comp_out(self) -> None:
+        path = filedialog.asksaveasfilename(title="Guardar PDF optimizado", defaultextension=".pdf", filetypes=[("PDF", "*.pdf")])
+        if path:
+            self.var_pdf_comp_out.set(path)
+
+    def on_browse_docx_comp_in(self) -> None:
+        path = filedialog.askopenfilename(title="Seleccionar DOCX", filetypes=[("DOCX", "*.docx")])
+        if path:
+            self.var_docx_comp_in.set(path)
+            if not self.var_docx_comp_out.get():
+                self.var_docx_comp_out.set(str(Path(path).with_name(Path(path).stem + '_compressed.docx')))
+
+    def on_browse_docx_comp_out(self) -> None:
+        path = filedialog.asksaveasfilename(title="Guardar DOCX comprimido", defaultextension=".docx", filetypes=[("DOCX", "*.docx")])
+        if path:
+            self.var_docx_comp_out.set(path)
+
+    # --- Conversions ---
     def on_convert_pdf2docx(self) -> None:
         in_path = self.var_input.get().strip()
         out_path = self.var_output.get().strip()
@@ -169,14 +395,13 @@ class Pdf2WordApp(tk.Tk):
             start_i: Optional[int] = int(start_s) if start_s else None
             end_i: Optional[int] = int(end_s) if end_s else None
         except ValueError:
-            messagebox.showerror("Rango inválido", "Las páginas de inicio/fin deben ser números enteros.")
+            messagebox.showerror("Rango invalido", "Las paginas de inicio/fin deben ser numeros enteros.")
             return
 
         input_pdf = Path(in_path)
         output_docx = Path(out_path) if out_path else input_pdf.with_suffix(".docx")
         overwrite = bool(self.var_overwrite.get())
 
-        # Ejecutar en hilo aparte para no congelar la UI
         th = threading.Thread(
             target=self._convert_pdf2docx_task,
             args=(input_pdf, output_docx, start_i, end_i, overwrite),
@@ -186,15 +411,15 @@ class Pdf2WordApp(tk.Tk):
 
     def _convert_pdf2docx_task(self, input_pdf: Path, output_docx: Path, start_i: Optional[int], end_i: Optional[int], overwrite: bool) -> None:
         try:
-            self._set_status("Convirtiendo…")
+            self._set_status("Convirtiendo...", indeterminate=True)
             pdf_to_docx(input_pdf, output_docx, start_i, end_i, overwrite)
         except Exception as e:
-            self._set_status("Error en la conversión")
-            messagebox.showerror("Error", str(e))
+            self._set_status("Error en la conversion")
+            self.after(0, lambda: messagebox.showerror("Error", str(e)))
             return
 
-        self._set_status("Conversión completada")
-        messagebox.showinfo("Listo", f"Archivo creado:\n{output_docx}")
+        self._set_status("Conversion completada")
+        self.after(0, lambda: messagebox.showinfo("Listo", f"Archivo creado:\n{output_docx}"))
 
     def on_convert_pdf2docx_raster(self) -> None:
         in_path = self.var_input.get().strip()
@@ -210,14 +435,14 @@ class Pdf2WordApp(tk.Tk):
 
     def _convert_pdf2docx_raster_task(self, input_pdf: Path, output_docx: Path, dpi: int) -> None:
         try:
-            self._set_status("Convirtiendo (imagen)…")
+            self._set_status("Convirtiendo (imagen)...", indeterminate=True)
             pdf_to_docx_raster(input_pdf, output_docx, dpi=dpi)
         except Exception as e:
-            self._set_status("Error en conversión por imagen")
-            messagebox.showerror("Error", str(e))
+            self._set_status("Error en conversion por imagen")
+            self.after(0, lambda: messagebox.showerror("Error", str(e)))
             return
-        self._set_status("Conversión completada")
-        messagebox.showinfo("Listo", f"Archivo creado:\n{output_docx}")
+        self._set_status("Conversion completada")
+        self.after(0, lambda: messagebox.showinfo("Listo", f"Archivo creado:\n{output_docx}"))
 
     def on_convert_pdf2docx_ocr(self) -> None:
         in_path = self.var_input.get().strip()
@@ -234,27 +459,14 @@ class Pdf2WordApp(tk.Tk):
 
     def _convert_pdf2docx_ocr_task(self, input_pdf: Path, output_docx: Path, dpi: int, lang: str) -> None:
         try:
-            self._set_status("Convirtiendo (OCR)…")
+            self._set_status("Convirtiendo (OCR)...", indeterminate=True)
             ocr_pdf_to_docx(input_pdf, output_docx, dpi=dpi, lang=lang)
         except Exception as e:
             self._set_status("Error en OCR")
-            messagebox.showerror("Error", str(e))
+            self.after(0, lambda: messagebox.showerror("Error", str(e)))
             return
-        self._set_status("Conversión completada")
-        messagebox.showinfo("Listo", f"Archivo creado:\n{output_docx}")
-
-    # DOCX -> PDF
-    def on_browse_docx_in(self) -> None:
-        path = filedialog.askopenfilename(title="Seleccionar DOCX", filetypes=[("Documento Word", "*.docx")])
-        if path:
-            self.var_docx_in.set(path)
-            if not self.var_pdf_out.get():
-                self.var_pdf_out.set(str(Path(path).with_suffix('.pdf')))
-
-    def on_browse_pdf_out(self) -> None:
-        path = filedialog.asksaveasfilename(title="Guardar como PDF", defaultextension=".pdf", filetypes=[("PDF", "*.pdf")])
-        if path:
-            self.var_pdf_out.set(path)
+        self._set_status("Conversion completada")
+        self.after(0, lambda: messagebox.showinfo("Listo", f"Archivo creado:\n{output_docx}"))
 
     def on_convert_docx2pdf(self) -> None:
         inp = self.var_docx_in.get().strip()
@@ -270,28 +482,16 @@ class Pdf2WordApp(tk.Tk):
 
     def _convert_docx2pdf_task(self, input_docx: Path, output_pdf: Path, overwrite: bool) -> None:
         try:
-            self._set_status("Convirtiendo DOCX → PDF…")
+            self._set_status("Convirtiendo DOCX a PDF...", indeterminate=True)
             docx_to_pdf(input_docx, output_pdf, overwrite)
         except Exception as e:
-            self._set_status("Error en DOCX→PDF")
-            messagebox.showerror("Error", str(e))
+            self._set_status("Error en DOCX a PDF")
+            self.after(0, lambda: messagebox.showerror("Error", str(e)))
             return
-        self._set_status("Conversión completada")
-        messagebox.showinfo("Listo", f"Archivo creado:\n{output_pdf}")
+        self._set_status("Conversion completada")
+        self.after(0, lambda: messagebox.showinfo("Listo", f"Archivo creado:\n{output_pdf}"))
 
-    # Compresión PDF
-    def on_browse_pdf_comp_in(self) -> None:
-        path = filedialog.askopenfilename(title="Seleccionar PDF", filetypes=[("PDF", "*.pdf")])
-        if path:
-            self.var_pdf_comp_in.set(path)
-            if not self.var_pdf_comp_out.get():
-                self.var_pdf_comp_out.set(str(Path(path).with_name(Path(path).stem + '_optimized.pdf')))
-
-    def on_browse_pdf_comp_out(self) -> None:
-        path = filedialog.asksaveasfilename(title="Guardar PDF optimizado", defaultextension=".pdf", filetypes=[("PDF", "*.pdf")])
-        if path:
-            self.var_pdf_comp_out.set(path)
-
+    # --- Compression ---
     def on_compress_pdf(self) -> None:
         inp = self.var_pdf_comp_in.get().strip()
         out = self.var_pdf_comp_out.get().strip()
@@ -303,27 +503,14 @@ class Pdf2WordApp(tk.Tk):
 
     def _compress_pdf_task(self, inp: Path, out: Path) -> None:
         try:
-            self._set_status("Optimizando PDF…")
+            self._set_status("Optimizando PDF...", indeterminate=True)
             compress_pdf(inp, out)
         except Exception as e:
             self._set_status("Error al optimizar PDF")
-            messagebox.showerror("Error", str(e))
+            self.after(0, lambda: messagebox.showerror("Error", str(e)))
             return
         self._set_status("PDF optimizado")
-        messagebox.showinfo("Listo", f"PDF optimizado:\n{out}")
-
-    # Compresión DOCX
-    def on_browse_docx_comp_in(self) -> None:
-        path = filedialog.askopenfilename(title="Seleccionar DOCX", filetypes=[("DOCX", "*.docx")])
-        if path:
-            self.var_docx_comp_in.set(path)
-            if not self.var_docx_comp_out.get():
-                self.var_docx_comp_out.set(str(Path(path).with_name(Path(path).stem + '_compressed.docx')))
-
-    def on_browse_docx_comp_out(self) -> None:
-        path = filedialog.asksaveasfilename(title="Guardar DOCX comprimido", defaultextension=".docx", filetypes=[("DOCX", "*.docx")])
-        if path:
-            self.var_docx_comp_out.set(path)
+        self.after(0, lambda: messagebox.showinfo("Listo", f"PDF optimizado:\n{out}"))
 
     def on_compress_docx(self) -> None:
         inp = self.var_docx_comp_in.get().strip()
@@ -342,111 +529,106 @@ class Pdf2WordApp(tk.Tk):
 
     def _compress_docx_task(self, inp: Path, out: Path, q: int, max_w: Optional[int], max_h: Optional[int]) -> None:
         try:
-            self._set_status("Comprimiendo imágenes DOCX…")
+            self._set_status("Comprimiendo imagenes DOCX...", indeterminate=True)
             compress_docx_images(inp, out, quality=q, max_width=max_w, max_height=max_h)
         except Exception as e:
             self._set_status("Error al comprimir DOCX")
-            messagebox.showerror("Error", str(e))
+            self.after(0, lambda: messagebox.showerror("Error", str(e)))
             return
         self._set_status("DOCX comprimido")
-        messagebox.showinfo("Listo", f"DOCX comprimido:\n{out}")
+        self.after(0, lambda: messagebox.showinfo("Listo", f"DOCX comprimido:\n{out}"))
 
-    def _set_status(self, text: str) -> None:
-        self.lbl_status.config(text=text)
-        self.lbl_status.update_idletasks()
-        self.progress.stop()
-        self.progress.config(value=0)
-
-        
-        # --- Tab Lotes ---
-        tab4 = ttk.Frame(notebook)
-        notebook.add(tab4, text="Lotes")
-        pad = {"padx": 10, "pady": 6}
-        self.file_list = tk.Listbox(tab4, height=10, selectmode=tk.EXTENDED)
-        self.file_list.grid(row=0, column=0, columnspan=3, sticky="nsew", **pad)
-        ttk.Button(tab4, text="Agregar PDFs", command=self.on_add_pdfs).grid(row=1, column=0, **pad)
-        ttk.Button(tab4, text="Agregar DOCXs", command=self.on_add_docxs).grid(row=1, column=1, **pad)
-        ttk.Button(tab4, text="Quitar seleccionados", command=self.on_remove_selected).grid(row=1, column=2, **pad)
-        ttk.Label(tab4, text="Carpeta salida:").grid(row=2, column=0, sticky=tk.W, **pad)
-        self.var_outdir_batch = tk.StringVar()
-        ttk.Entry(tab4, textvariable=self.var_outdir_batch, width=56).grid(row=2, column=1, sticky=tk.W, **pad)
-        ttk.Button(tab4, text="Elegir…", command=self.on_choose_outdir_batch).grid(row=2, column=2, **pad)
-        self.var_batch_pdf2docx = tk.BooleanVar(value=True)
-        self.var_batch_raster = tk.BooleanVar(value=False)
-        self.var_batch_docx2pdf = tk.BooleanVar(value=False)
-        ttk.Checkbutton(tab4, text="PDF → DOCX", variable=self.var_batch_pdf2docx).grid(row=3, column=0, sticky=tk.W, **pad)
-        ttk.Checkbutton(tab4, text="Fidelidad exacta (imagen)", variable=self.var_batch_raster).grid(row=3, column=1, sticky=tk.W, **pad)
-        ttk.Checkbutton(tab4, text="DOCX → PDF", variable=self.var_batch_docx2pdf).grid(row=3, column=2, sticky=tk.W, **pad)
-        self.var_batch_overwrite = tk.BooleanVar(value=True)
-        ttk.Checkbutton(tab4, text="Sobrescribir", variable=self.var_batch_overwrite).grid(row=4, column=2, sticky=tk.W, **pad)
-        ttk.Label(tab4, text="DPI:").grid(row=4, column=0, sticky=tk.W, **pad)
-        self.var_batch_dpi = tk.IntVar(value=200)
-        ttk.Entry(tab4, textvariable=self.var_batch_dpi, width=10).grid(row=4, column=1, sticky=tk.W, **pad)
-        ttk.Button(tab4, text="Convertir lote", command=self.on_run_batch).grid(row=5, column=2, sticky=tk.E, **pad)
-        for i in range(3):
-            tab4.grid_columnconfigure(i, weight=1 if i == 1 else 0)
-
-    # --- Handlers de pestaña Lotes ---
-    def on_add_pdfs(self):
+    # --- Batch ---
+    def on_add_pdfs(self) -> None:
         paths = filedialog.askopenfilenames(title="Seleccionar PDFs", filetypes=[("PDF", "*.pdf")])
         for p in paths:
-            self.file_list.insert(tk.END, p)
+            self.batch_files.append(Path(p))
+        self._update_file_list()
 
-    def on_add_docxs(self):
+    def on_add_docxs(self) -> None:
         paths = filedialog.askopenfilenames(title="Seleccionar DOCXs", filetypes=[("DOCX", "*.docx")])
         for p in paths:
-            self.file_list.insert(tk.END, p)
+            self.batch_files.append(Path(p))
+        self._update_file_list()
 
-    def on_remove_selected(self):
-        sel = list(self.file_list.curselection())
-        for idx in reversed(sel):
-            self.file_list.delete(idx)
+    def on_clear_list(self) -> None:
+        self.batch_files.clear()
+        self._update_file_list()
 
-    def on_choose_outdir_batch(self):
+    def _update_file_list(self) -> None:
+        self.file_listbox.configure(state="normal")
+        self.file_listbox.delete("1.0", "end")
+        for i, f in enumerate(self.batch_files, 1):
+            self.file_listbox.insert("end", f"{i}. {f.name}\n")
+        self.file_listbox.configure(state="disabled")
+
+    def on_choose_outdir_batch(self) -> None:
         path = filedialog.askdirectory(title="Elegir carpeta de salida")
         if path:
             self.var_outdir_batch.set(path)
 
-    def on_run_batch(self):
-        items = [Path(self.file_list.get(i)) for i in range(self.file_list.size())]
+    def on_run_batch(self) -> None:
+        if not self.batch_files:
+            messagebox.showwarning("Sin archivos", "Agrega archivos a la lista primero.")
+            return
         outdir = Path(self.var_outdir_batch.get()) if self.var_outdir_batch.get().strip() else Path.cwd()
         do_pdf2docx = bool(self.var_batch_pdf2docx.get())
         do_raster = bool(self.var_batch_raster.get())
         do_docx2pdf = bool(self.var_batch_docx2pdf.get())
         dpi = int(self.var_batch_dpi.get()) if str(self.var_batch_dpi.get()).strip() else 200
         overwrite = bool(self.var_batch_overwrite.get())
-        th = threading.Thread(target=self._run_batch_task, args=(items, outdir, do_pdf2docx, do_raster, do_docx2pdf, dpi, overwrite), daemon=True)
+        th = threading.Thread(target=self._run_batch_task, args=(list(self.batch_files), outdir, do_pdf2docx, do_raster, do_docx2pdf, dpi, overwrite), daemon=True)
         th.start()
 
-    def _run_batch_task(self, items: list[Path], outdir: Path, do_pdf2docx: bool, do_raster: bool, do_docx2pdf: bool, dpi: int, overwrite: bool):
+    def _run_batch_task(self, items: list[Path], outdir: Path, do_pdf2docx: bool, do_raster: bool, do_docx2pdf: bool, dpi: int, overwrite: bool) -> None:
         try:
-            self._set_status("Procesando lote…")
-            self.progress.config(mode="determinate", maximum=max(1, len(items)))
-            done = 0
+            self._set_status("Procesando lote...", indeterminate=True)
             pdfs = [p for p in items if p.suffix.lower() == ".pdf"]
             docxs = [p for p in items if p.suffix.lower() == ".docx"]
+            total = 0
             if do_pdf2docx:
-                mode = "raster" if do_raster else "editable"
+                total += len(pdfs)
+            if do_docx2pdf:
+                total += len(docxs)
+
+            done = 0
+            if do_pdf2docx:
                 for p in pdfs:
                     tgt = outdir / (p.stem + ".docx")
-                    if mode == "raster":
+                    if do_raster:
                         pdf_to_docx_raster(p, tgt, dpi=dpi, overwrite=overwrite)
                     else:
                         pdf_to_docx(p, tgt, None, None, overwrite)
                     done += 1
-                    self.progress.config(value=done)
+                    self._update_progress(done, total)
             if do_docx2pdf:
                 for d in docxs:
                     tgt = outdir / (d.stem + ".pdf")
                     docx_to_pdf(d, tgt, overwrite)
                     done += 1
-                    self.progress.config(value=done)
+                    self._update_progress(done, total)
         except Exception as e:
             self._set_status("Error en lote")
-            messagebox.showerror("Error", str(e))
+            self.after(0, lambda: messagebox.showerror("Error", str(e)))
             return
         self._set_status("Lote completado")
-        messagebox.showinfo("Listo", f"Lote completado en:\n{outdir}")
+        self.after(0, lambda: messagebox.showinfo("Listo", f"Lote completado en:\n{outdir}"))
+
+    def _update_progress(self, current: int, total: int) -> None:
+        if total > 0:
+            self.after(0, lambda: self.progress.set(current / total))
+
+    def _set_status(self, text: str, indeterminate: bool = False) -> None:
+        def update():
+            self.lbl_status.configure(text=text)
+            if indeterminate:
+                self.progress.configure(mode="indeterminate")
+                self.progress.start()
+            else:
+                self.progress.stop()
+                self.progress.configure(mode="determinate")
+                self.progress.set(0)
+        self.after(0, update)
 
 
 if __name__ == "__main__":
