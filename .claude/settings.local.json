@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(python -c:*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(dir /b \"c:\\\\Users\\\\USER\\\\Desktop\\\\programs\\\\apppdf\\\\*.py\")"
     ]
   }
 }
