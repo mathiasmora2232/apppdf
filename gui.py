@@ -57,7 +57,15 @@ class Pdf2WordApp(tk.Tk):
         ttk.Label(tab1, text="Página fin (1-basado):").grid(row=3, column=0, sticky=tk.W, **pad)
         ttk.Entry(tab1, textvariable=self.var_end, width=12).grid(row=3, column=1, sticky=tk.W, **pad)
         ttk.Checkbutton(tab1, text="Sobrescribir si existe", variable=self.var_overwrite).grid(row=4, column=1, sticky=tk.W, **pad)
-        ttk.Button(tab1, text="Convertir", command=self.on_convert_pdf2docx).grid(row=5, column=2, sticky=tk.E, **pad)
+        ttk.Button(tab1, text="Convertir (editable)", command=self.on_convert_pdf2docx).grid(row=5, column=2, sticky=tk.E, **pad)
+
+        # Modo fidelidad exacta (raster)
+        self.var_raster_on = tk.BooleanVar(value=False)
+        ttk.Checkbutton(tab1, text="Fidelidad exacta (imagen)", variable=self.var_raster_on).grid(row=6, column=1, sticky=tk.W, **pad)
+        ttk.Label(tab1, text="DPI:").grid(row=6, column=0, sticky=tk.W, **pad)
+        self.var_raster_dpi = tk.IntVar(value=200)
+        ttk.Entry(tab1, textvariable=self.var_raster_dpi, width=8).grid(row=6, column=1, sticky=tk.W, padx=120)
+        ttk.Button(tab1, text="Convertir (imagen)", command=self.on_convert_pdf2docx_raster).grid(row=7, column=2, sticky=tk.E, **pad)
 
         # --- Tab DOCX->PDF ---
         tab2 = ttk.Frame(notebook)
@@ -161,6 +169,29 @@ class Pdf2WordApp(tk.Tk):
             messagebox.showerror("Error", str(e))
             return
 
+        self._set_status("Conversión completada")
+        messagebox.showinfo("Listo", f"Archivo creado:\n{output_docx}")
+
+    def on_convert_pdf2docx_raster(self) -> None:
+        in_path = self.var_input.get().strip()
+        out_path = self.var_output.get().strip()
+        if not in_path:
+            messagebox.showwarning("Falta archivo", "Selecciona un archivo PDF de entrada.")
+            return
+        input_pdf = Path(in_path)
+        output_docx = Path(out_path) if out_path else input_pdf.with_suffix(".docx")
+        dpi = int(self.var_raster_dpi.get()) if str(self.var_raster_dpi.get()).strip() else 200
+        th = threading.Thread(target=self._convert_pdf2docx_raster_task, args=(input_pdf, output_docx, dpi), daemon=True)
+        th.start()
+
+    def _convert_pdf2docx_raster_task(self, input_pdf: Path, output_docx: Path, dpi: int) -> None:
+        try:
+            self._set_status("Convirtiendo (imagen)…")
+            pdf_to_docx_raster(input_pdf, output_docx, dpi=dpi)
+        except Exception as e:
+            self._set_status("Error en conversión por imagen")
+            messagebox.showerror("Error", str(e))
+            return
         self._set_status("Conversión completada")
         messagebox.showinfo("Listo", f"Archivo creado:\n{output_docx}")
 
