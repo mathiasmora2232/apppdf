@@ -1,5 +1,6 @@
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Iterable, Callable
+import struct
 
 from pdf2docx import Converter
 import fitz  # PyMuPDF
@@ -8,10 +9,12 @@ from PIL import Image
 import io
 import zipfile
 from docx import Document
-from docx.shared import Inches
-from typing import Iterable
+from docx.shared import Inches, Pt, Emu
+from docx.oxml.ns import nsmap, qn
+from docx.oxml import OxmlElement
 import pytesseract
 import shutil
+import os
 
 
 def pdf_to_docx(input_pdf: Path, output_docx: Path, start_page: Optional[int], end_page: Optional[int], overwrite: bool) -> None:

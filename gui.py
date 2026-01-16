@@ -291,7 +291,7 @@ class Pdf2WordApp(ctk.CTk):
         ctk.CTkLabel(dpi_frame, text="DPI (modo imagen):").pack(side="left")
         ctk.CTkEntry(dpi_frame, textvariable=self.var_batch_dpi, width=60).pack(side="left", padx=10)
 
-        ctk.CTkButton(options_frame, text="Iniciar Conversion", width=180, height=40, fg_color="#4CAF50", hover_color="#388E3C", font=ctk.CTkFont(size=14, weight="bold"), command=self.on_run_batch).pack(side="right", padx=15, pady=12)
+        ctk.CTkButton(options_frame, text="Iniciar Conversion", width=220, height=50, fg_color="#4CAF50", hover_color="#388E3C", font=ctk.CTkFont(size=16, weight="bold"), corner_radius=12, command=self.on_run_batch).pack(side="right", padx=15, pady=15)
 
     def _build_status_bar(self) -> None:
         status_frame = ctk.CTkFrame(self, height=50, fg_color=("gray85", "gray20"))
