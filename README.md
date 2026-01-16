@@ -23,10 +23,9 @@ C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe gui.py
 ```
 
 En la ventana podrás:
-- Elegir el PDF de entrada.
-- Opcional: elegir el archivo DOCX de salida (si no, usa el mismo nombre que el PDF).
-- Definir rango de páginas (inicio/fin 1-basado) y si deseas sobrescribir.
-- Ejecutar la conversión y recibir un aviso al terminar.
+- PDF → DOCX: elegir PDF, salida DOCX opcional, rango de páginas y sobrescribir.
+- DOCX → PDF: elegir DOCX y salida PDF (usa Microsoft Word vía docx2pdf si está disponible).
+- Compresión: optimizar PDF (limpieza y deflate) y comprimir imágenes en DOCX (calidad y tamaño máximo).
 
 ## Uso rápido
 
@@ -51,9 +50,29 @@ python main.py "archivo.pdf" -o "salida.docx" --start 2 --end 5
 python main.py "archivo.pdf" -o "salida.docx" --overwrite
 ```
 
+## CLI avanzado (múltiples funciones)
+
+```powershell
+# Ayuda general
+C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe cli.py --help
+
+# PDF → DOCX
+C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe cli.py pdf2docx "input.pdf" -o "output.docx" --start 1 --end 3 --overwrite
+
+# DOCX → PDF (requiere Microsoft Word instalado en Windows)
+C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe cli.py docx2pdf "input.docx" -o "output.pdf" --overwrite
+
+# Optimizar PDF (reduce tamaño limpiando y deflating)
+C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe cli.py compress-pdf "input.pdf" -o "optimized.pdf"
+
+# Comprimir imágenes dentro de DOCX
+C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe cli.py compress-docx "input.docx" -o "compressed.docx" --quality 70 --max-width 1600 --max-height 1200
+```
+
 ## Limitaciones y notas
 - Este conversor no realiza OCR: los PDF escaneados como imagen no extraerán texto.
 - La fidelidad del diseño puede variar según el contenido del PDF.
+- Para máxima fidelidad de DOCX → PDF en Windows se usa Microsoft Word (docx2pdf). Si no está instalado, fallará.
 - Para OCR, puedes evaluar instalar Tesseract y usar `pytesseract` + `pdf2image` (no incluido por simplicidad).
 
 ## Estructura

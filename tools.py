@@ -100,4 +100,4 @@ def compress_docx_images(input_docx: Path, output_docx: Path, quality: int = 75,
                     # Si no se pudo, dejar el original
                     pass
             zout.writestr(item, data)
-*** End Patch
+ 
