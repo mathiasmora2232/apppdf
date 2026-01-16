@@ -77,6 +77,16 @@ class Pdf2WordApp(tk.Tk):
         ttk.Entry(tab1, textvariable=self.var_raster_dpi, width=8).grid(row=6, column=1, sticky=tk.W, padx=120)
         ttk.Button(tab1, text="Convertir (imagen)", command=self.on_convert_pdf2docx_raster).grid(row=7, column=2, sticky=tk.E, **pad)
 
+        # OCR (texto)
+        ttk.Separator(tab1).grid(row=8, column=0, columnspan=3, sticky="ew", **pad)
+        ttk.Label(tab1, text="OCR idioma (ej.: spa, eng, spa+eng):").grid(row=9, column=0, sticky=tk.W, **pad)
+        self.var_ocr_lang = tk.StringVar(value="spa")
+        ttk.Entry(tab1, textvariable=self.var_ocr_lang, width=20).grid(row=9, column=1, sticky=tk.W, **pad)
+        ttk.Label(tab1, text="OCR DPI:").grid(row=10, column=0, sticky=tk.W, **pad)
+        self.var_ocr_dpi = tk.IntVar(value=300)
+        ttk.Entry(tab1, textvariable=self.var_ocr_dpi, width=10).grid(row=10, column=1, sticky=tk.W, **pad)
+        ttk.Button(tab1, text="Convertir (OCR texto)", command=self.on_convert_pdf2docx_ocr).grid(row=11, column=2, sticky=tk.E, **pad)
+
         # --- Tab DOCX->PDF ---
         tab2 = ttk.Frame(notebook)
         notebook.add(tab2, text="DOCX → PDF")
@@ -204,6 +214,30 @@ class Pdf2WordApp(tk.Tk):
             pdf_to_docx_raster(input_pdf, output_docx, dpi=dpi)
         except Exception as e:
             self._set_status("Error en conversión por imagen")
+            messagebox.showerror("Error", str(e))
+            return
+        self._set_status("Conversión completada")
+        messagebox.showinfo("Listo", f"Archivo creado:\n{output_docx}")
+
+    def on_convert_pdf2docx_ocr(self) -> None:
+        in_path = self.var_input.get().strip()
+        out_path = self.var_output.get().strip()
+        if not in_path:
+            messagebox.showwarning("Falta archivo", "Selecciona un archivo PDF de entrada.")
+            return
+        input_pdf = Path(in_path)
+        output_docx = Path(out_path) if out_path else input_pdf.with_suffix(".docx")
+        dpi = int(self.var_ocr_dpi.get()) if str(self.var_ocr_dpi.get()).strip() else 300
+        lang = self.var_ocr_lang.get().strip() or "spa"
+        th = threading.Thread(target=self._convert_pdf2docx_ocr_task, args=(input_pdf, output_docx, dpi, lang), daemon=True)
+        th.start()
+
+    def _convert_pdf2docx_ocr_task(self, input_pdf: Path, output_docx: Path, dpi: int, lang: str) -> None:
+        try:
+            self._set_status("Convirtiendo (OCR)…")
+            ocr_pdf_to_docx(input_pdf, output_docx, dpi=dpi, lang=lang)
+        except Exception as e:
+            self._set_status("Error en OCR")
             messagebox.showerror("Error", str(e))
             return
         self._set_status("Conversión completada")
