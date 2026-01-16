@@ -11,8 +11,18 @@ class Pdf2WordApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("PDF → Word (DOCX)")
-        self.geometry("640x420")
+        self.geometry("760x520")
         self.resizable(False, False)
+
+        # Tema más amable
+        style = ttk.Style()
+        try:
+            style.theme_use("vista")
+        except Exception:
+            style.theme_use("clam")
+        style.configure("TLabel", font=("Segoe UI", 10))
+        style.configure("TButton", font=("Segoe UI", 10))
+        style.configure("TEntry", padding=2)
 
         # Variables de estado
         self.var_input = tk.StringVar()
@@ -107,8 +117,12 @@ class Pdf2WordApp(tk.Tk):
         ttk.Button(tab3, text="Comprimir DOCX", command=self.on_compress_docx).grid(row=9, column=2, sticky=tk.E, **pad)
 
         # Barra de estado
-        self.lbl_status = ttk.Label(self, text="Listo", foreground="#444")
-        self.lbl_status.pack(anchor=tk.W, padx=10, pady=6)
+        status_frame = ttk.Frame(self)
+        status_frame.pack(fill=tk.X, padx=10, pady=6)
+        self.progress = ttk.Progressbar(status_frame, length=200, mode="determinate")
+        self.progress.pack(side=tk.RIGHT)
+        self.lbl_status = ttk.Label(status_frame, text="Listo", foreground="#444")
+        self.lbl_status.pack(side=tk.LEFT)
 
     def on_browse_pdf(self) -> None:
         path = filedialog.askopenfilename(
@@ -306,6 +320,96 @@ class Pdf2WordApp(tk.Tk):
     def _set_status(self, text: str) -> None:
         self.lbl_status.config(text=text)
         self.lbl_status.update_idletasks()
+        self.progress.stop()
+        self.progress.config(value=0)
+
+        
+        # --- Tab Lotes ---
+        tab4 = ttk.Frame(notebook)
+        notebook.add(tab4, text="Lotes")
+        pad = {"padx": 10, "pady": 6}
+        self.file_list = tk.Listbox(tab4, height=10, selectmode=tk.EXTENDED)
+        self.file_list.grid(row=0, column=0, columnspan=3, sticky="nsew", **pad)
+        ttk.Button(tab4, text="Agregar PDFs", command=self.on_add_pdfs).grid(row=1, column=0, **pad)
+        ttk.Button(tab4, text="Agregar DOCXs", command=self.on_add_docxs).grid(row=1, column=1, **pad)
+        ttk.Button(tab4, text="Quitar seleccionados", command=self.on_remove_selected).grid(row=1, column=2, **pad)
+        ttk.Label(tab4, text="Carpeta salida:").grid(row=2, column=0, sticky=tk.W, **pad)
+        self.var_outdir_batch = tk.StringVar()
+        ttk.Entry(tab4, textvariable=self.var_outdir_batch, width=56).grid(row=2, column=1, sticky=tk.W, **pad)
+        ttk.Button(tab4, text="Elegir…", command=self.on_choose_outdir_batch).grid(row=2, column=2, **pad)
+        self.var_batch_pdf2docx = tk.BooleanVar(value=True)
+        self.var_batch_raster = tk.BooleanVar(value=False)
+        self.var_batch_docx2pdf = tk.BooleanVar(value=False)
+        ttk.Checkbutton(tab4, text="PDF → DOCX", variable=self.var_batch_pdf2docx).grid(row=3, column=0, sticky=tk.W, **pad)
+        ttk.Checkbutton(tab4, text="Fidelidad exacta (imagen)", variable=self.var_batch_raster).grid(row=3, column=1, sticky=tk.W, **pad)
+        ttk.Checkbutton(tab4, text="DOCX → PDF", variable=self.var_batch_docx2pdf).grid(row=3, column=2, sticky=tk.W, **pad)
+        ttk.Label(tab4, text="DPI:").grid(row=4, column=0, sticky=tk.W, **pad)
+        self.var_batch_dpi = tk.IntVar(value=200)
+        ttk.Entry(tab4, textvariable=self.var_batch_dpi, width=10).grid(row=4, column=1, sticky=tk.W, **pad)
+        ttk.Button(tab4, text="Convertir lote", command=self.on_run_batch).grid(row=5, column=2, sticky=tk.E, **pad)
+        for i in range(3):
+            tab4.grid_columnconfigure(i, weight=1 if i == 1 else 0)
+
+    # --- Handlers de pestaña Lotes ---
+    def on_add_pdfs(self):
+        paths = filedialog.askopenfilenames(title="Seleccionar PDFs", filetypes=[("PDF", "*.pdf")])
+        for p in paths:
+            self.file_list.insert(tk.END, p)
+
+    def on_add_docxs(self):
+        paths = filedialog.askopenfilenames(title="Seleccionar DOCXs", filetypes=[("DOCX", "*.docx")])
+        for p in paths:
+            self.file_list.insert(tk.END, p)
+
+    def on_remove_selected(self):
+        sel = list(self.file_list.curselection())
+        for idx in reversed(sel):
+            self.file_list.delete(idx)
+
+    def on_choose_outdir_batch(self):
+        path = filedialog.askdirectory(title="Elegir carpeta de salida")
+        if path:
+            self.var_outdir_batch.set(path)
+
+    def on_run_batch(self):
+        items = [Path(self.file_list.get(i)) for i in range(self.file_list.size())]
+        outdir = Path(self.var_outdir_batch.get()) if self.var_outdir_batch.get().strip() else Path.cwd()
+        do_pdf2docx = bool(self.var_batch_pdf2docx.get())
+        do_raster = bool(self.var_batch_raster.get())
+        do_docx2pdf = bool(self.var_batch_docx2pdf.get())
+        dpi = int(self.var_batch_dpi.get()) if str(self.var_batch_dpi.get()).strip() else 200
+        th = threading.Thread(target=self._run_batch_task, args=(items, outdir, do_pdf2docx, do_raster, do_docx2pdf, dpi), daemon=True)
+        th.start()
+
+    def _run_batch_task(self, items: list[Path], outdir: Path, do_pdf2docx: bool, do_raster: bool, do_docx2pdf: bool, dpi: int):
+        try:
+            self._set_status("Procesando lote…")
+            self.progress.config(mode="determinate", maximum=max(1, len(items)))
+            done = 0
+            pdfs = [p for p in items if p.suffix.lower() == ".pdf"]
+            docxs = [p for p in items if p.suffix.lower() == ".docx"]
+            if do_pdf2docx:
+                mode = "raster" if do_raster else "editable"
+                for p in pdfs:
+                    tgt = outdir / (p.stem + ".docx")
+                    if mode == "raster":
+                        pdf_to_docx_raster(p, tgt, dpi=dpi)
+                    else:
+                        pdf_to_docx(p, tgt, None, None, True)
+                    done += 1
+                    self.progress.config(value=done)
+            if do_docx2pdf:
+                for d in docxs:
+                    tgt = outdir / (d.stem + ".pdf")
+                    docx_to_pdf(d, tgt, True)
+                    done += 1
+                    self.progress.config(value=done)
+        except Exception as e:
+            self._set_status("Error en lote")
+            messagebox.showerror("Error", str(e))
+            return
+        self._set_status("Lote completado")
+        messagebox.showinfo("Listo", f"Lote completado en:\n{outdir}")
 
 
 if __name__ == "__main__":
