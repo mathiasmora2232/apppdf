@@ -77,11 +77,24 @@ C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe cli.py batch "C:\
 ```
 
 ## Limitaciones y notas
-- Este conversor no realiza OCR: los PDF escaneados como imagen no extraerán texto.
-- La fidelidad del diseño puede variar según el contenido del PDF.
-- Para máxima fidelidad de DOCX → PDF en Windows se usa Microsoft Word (docx2pdf). Si no está instalado, fallará.
-- Para OCR, puedes evaluar instalar Tesseract y usar `pytesseract` + `pdf2image` (no incluido por simplicidad).
 
+## OCR (PDF imagen → DOCX texto)
+
+Requisitos adicionales:
+- Instalar Tesseract OCR:
+	- Winget: `winget install -e --id UB-Mannheim.TesseractOCR`
+	- O descarga: https://github.com/tesseract-ocr/tesseract
+- Ajustar idioma: por defecto `eng`; para español usa `spa` si tienes el paquete instalado.
+	- Si ves el error de `spa.traineddata`, instala el idioma español o usa `--lang eng`.
+
+CLI:
+```powershell
+C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe cli.py ocr-pdf2docx "input.pdf" -o "output.docx" --dpi 300 --lang eng
+# Idioma mixto (si instalados): --lang spa+eng
+```
+
+GUI:
+- En la pestaña PDF → DOCX, usa “Convertir (OCR texto)”, define `OCR idioma` y `OCR DPI`.
 ## Estructura
 - `main.py`: CLI del convertidor
 - `gui.py`: Interfaz gráfica con Tkinter
