@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual envs
+.venv/
+.env/
+venv/
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+*.spec
+
+# Logs / caches
+*.log
+*.tmp
+*.temp
+.cache/
+.mypy_cache/
+.pytest_cache/
+coverage.xml
+htmlcov/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local data/artifacts
+*.pdf
+*.docx
+!sample.pdf
+!sample.docx
+*.zip
+*.7z
+
+# PyInstaller artifacts
+build/convertidor/
+dist/convertidor.exe
+
+# Node (por si acaso)
+node_modules/

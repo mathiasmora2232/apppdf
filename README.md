@@ -95,6 +95,23 @@ C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe cli.py ocr-pdf2do
 
 GUI:
 - En la pestaña PDF → DOCX, usa “Convertir (OCR texto)”, define `OCR idioma` y `OCR DPI`.
+
+## Publicar un Release en GitHub
+
+1) Crea un tag de versión y empuja al remoto:
+```powershell
+git tag v1.0.0
+git push origin v1.0.0
+```
+2) GitHub Actions construirá el EXE con PyInstaller y lo adjuntará al Release.
+	- Workflow: .github/workflows/release.yml
+	- Salida: dist/convertidor.exe
+
+Build local opcional:
+```powershell
+./scripts/build_exe.ps1
+```
+Si ves “No module named customtkinter”, asegúrate de usar el flag `--hidden-import customtkinter` (ya incluido).
 ## Estructura
 - `main.py`: CLI del convertidor
 - `gui.py`: Interfaz gráfica con Tkinter
