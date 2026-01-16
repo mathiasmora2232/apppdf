@@ -20,6 +20,12 @@ def build_parser() -> argparse.ArgumentParser:
     p1.add_argument("--end", type=int, help="Página final (1-basado)")
     p1.add_argument("--overwrite", action="store_true", help="Sobrescribe si el DOCX existe")
 
+    # pdf2docx-raster (máxima fidelidad visual)
+    p1r = sub.add_parser("pdf2docx-raster", help="PDF → DOCX por imagen (máxima fidelidad, no editable)")
+    p1r.add_argument("input", help="Ruta al PDF")
+    p1r.add_argument("-o", "--output", help="Ruta del DOCX de salida")
+    p1r.add_argument("--dpi", type=int, default=200, help="Resolución de render (por defecto 200 DPI)")
+
     # docx2pdf
     p2 = sub.add_parser("docx2pdf", help="Convertir DOCX a PDF")
     p2.add_argument("input", help="Ruta al DOCX")
