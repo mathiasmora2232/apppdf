@@ -7,6 +7,8 @@ from docx2pdf import convert as docx2pdf_convert
 from PIL import Image
 import io
 import zipfile
+from docx import Document
+from docx.shared import Inches
 
 
 def pdf_to_docx(input_pdf: Path, output_docx: Path, start_page: Optional[int], end_page: Optional[int], overwrite: bool) -> None:
@@ -100,4 +102,41 @@ def compress_docx_images(input_docx: Path, output_docx: Path, quality: int = 75,
                     # Si no se pudo, dejar el original
                     pass
             zout.writestr(item, data)
+ 
+
+def pdf_to_docx_raster(input_pdf: Path, output_docx: Path, dpi: int = 200) -> None:
+    """Convierte cada página del PDF a imagen y la inserta en un DOCX.
+    Máxima fidelidad visual (no editable)."""
+    if not input_pdf.exists():
+        raise FileNotFoundError(f"No existe el PDF: {input_pdf}")
+
+    output_docx = output_docx.with_suffix(".docx")
+    output_docx.parent.mkdir(parents=True, exist_ok=True)
+
+    doc_pdf = fitz.open(str(input_pdf))
+    docx_doc = Document()
+
+    # Usar ancho de página menos márgenes para ajustar imagen
+    section = docx_doc.sections[0]
+    page_width = section.page_width
+    left_margin = section.left_margin
+    right_margin = section.right_margin
+    usable_width = page_width - left_margin - right_margin
+
+    for i in range(len(doc_pdf)):
+        page = doc_pdf[i]
+        # Escala dpi/72
+        zoom = dpi / 72.0
+        mat = fitz.Matrix(zoom, zoom)
+        pix = page.get_pixmap(matrix=mat, alpha=False)
+        img_bytes = pix.tobytes("png")
+        stream = io.BytesIO(img_bytes)
+        pic = docx_doc.add_picture(stream)
+        # Ajustar al ancho usable manteniendo proporción
+        pic.width = usable_width
+        if i < len(doc_pdf) - 1:
+            docx_doc.add_page_break()
+
+    doc_pdf.close()
+    docx_doc.save(str(output_docx))
  
