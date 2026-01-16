@@ -2,11 +2,13 @@ import threading
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
+from datetime import datetime
 
 from tools import (
-    pdf_to_docx, docx_to_pdf, compress_pdf, compress_docx_images,
-    pdf_to_docx_raster, ocr_pdf_to_docx, convert_image, batch_convert_images,
+    pdf_to_docx_with_progress, docx_to_pdf, compress_pdf_with_progress,
+    compress_docx_images_with_progress, pdf_to_docx_raster_with_progress,
+    ocr_pdf_to_docx_with_progress, convert_image, batch_convert_images,
     get_image_info, extract_images_from_pdf, extract_images_from_docx,
     SUPPORTED_IMAGE_FORMATS
 )
@@ -14,6 +16,184 @@ from tools import (
 # Configurar apariencia
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
+
+
+class ProgressModal(ctk.CTkToplevel):
+    """Modal de progreso con log detallado estilo terminal."""
+
+    def __init__(self, parent, title: str = "Procesando..."):
+        super().__init__(parent)
+        self.title(title)
+        self.geometry("550x420")
+        self.resizable(False, False)
+
+        # Centrar en pantalla
+        self.update_idletasks()
+        x = (self.winfo_screenwidth() - 550) // 2
+        y = (self.winfo_screenheight() - 420) // 2
+        self.geometry(f"550x420+{x}+{y}")
+
+        # Modal behavior
+        self.transient(parent)
+        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self._on_close_attempt)
+
+        self._completed = False
+        self._cancelled = False
+        self._build_ui(title)
+
+    def _build_ui(self, title: str) -> None:
+        # Header
+        header = ctk.CTkFrame(self, fg_color="transparent")
+        header.pack(fill="x", padx=20, pady=(20, 10))
+
+        self.title_label = ctk.CTkLabel(
+            header, text=title,
+            font=ctk.CTkFont(size=18, weight="bold")
+        )
+        self.title_label.pack(side="left")
+
+        self.status_label = ctk.CTkLabel(
+            header, text="Iniciando...",
+            font=ctk.CTkFont(size=12),
+            text_color=("gray50", "gray60")
+        )
+        self.status_label.pack(side="right")
+
+        # Progress bar
+        progress_frame = ctk.CTkFrame(self, fg_color="transparent")
+        progress_frame.pack(fill="x", padx=20, pady=10)
+
+        self.progress_bar = ctk.CTkProgressBar(progress_frame, height=20, corner_radius=8)
+        self.progress_bar.pack(fill="x")
+        self.progress_bar.set(0)
+
+        self.progress_label = ctk.CTkLabel(
+            progress_frame, text="0%",
+            font=ctk.CTkFont(size=14, weight="bold")
+        )
+        self.progress_label.pack(pady=(5, 0))
+
+        # Log area (estilo terminal)
+        log_frame = ctk.CTkFrame(self, fg_color=("gray85", "gray20"))
+        log_frame.pack(fill="both", expand=True, padx=20, pady=10)
+
+        self.log_text = ctk.CTkTextbox(
+            log_frame,
+            font=ctk.CTkFont(family="Consolas", size=11),
+            fg_color=("gray95", "gray10"),
+            text_color=("gray20", "gray80"),
+            corner_radius=8
+        )
+        self.log_text.pack(fill="both", expand=True, padx=10, pady=10)
+        self.log_text.configure(state="disabled")
+
+        # Buttons
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=20, pady=(0, 20))
+
+        self.cancel_btn = ctk.CTkButton(
+            btn_frame, text="Cancelar", width=120,
+            fg_color="#F44336", hover_color="#D32F2F",
+            command=self._on_cancel
+        )
+        self.cancel_btn.pack(side="left")
+
+        self.close_btn = ctk.CTkButton(
+            btn_frame, text="Cerrar", width=120,
+            state="disabled",
+            command=self._on_close
+        )
+        self.close_btn.pack(side="right")
+
+    def log(self, message: str, level: str = "info") -> None:
+        """Agrega un mensaje al log."""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        prefix = ""
+        color = None
+
+        if level == "success":
+            prefix = "[OK] "
+            color = "#4CAF50"
+        elif level == "error":
+            prefix = "[ERROR] "
+            color = "#F44336"
+        elif level == "warning":
+            prefix = "[AVISO] "
+            color = "#FF9800"
+        elif level == "progress":
+            prefix = ">>> "
+            color = "#2196F3"
+
+        def update():
+            self.log_text.configure(state="normal")
+            self.log_text.insert("end", f"[{timestamp}] {prefix}{message}\n")
+            self.log_text.see("end")
+            self.log_text.configure(state="disabled")
+
+        self.after(0, update)
+
+    def set_progress(self, current: int, total: int, message: str = "") -> None:
+        """Actualiza la barra de progreso."""
+        if total > 0:
+            progress = current / total
+            percent = int(progress * 100)
+
+            def update():
+                self.progress_bar.set(progress)
+                self.progress_label.configure(text=f"{percent}%")
+                if message:
+                    self.status_label.configure(text=message)
+
+            self.after(0, update)
+
+    def set_status(self, status: str) -> None:
+        """Actualiza el texto de estado."""
+        self.after(0, lambda: self.status_label.configure(text=status))
+
+    def set_title(self, title: str) -> None:
+        """Actualiza el titulo."""
+        self.after(0, lambda: self.title_label.configure(text=title))
+
+    def complete(self, success: bool = True, message: str = "") -> None:
+        """Marca el proceso como completado."""
+        self._completed = True
+
+        def update():
+            self.progress_bar.set(1.0)
+            self.progress_label.configure(text="100%")
+
+            if success:
+                self.status_label.configure(text="Completado", text_color="#4CAF50")
+                self.log(message or "Proceso completado exitosamente", "success")
+            else:
+                self.status_label.configure(text="Error", text_color="#F44336")
+                self.log(message or "El proceso termino con errores", "error")
+
+            self.cancel_btn.configure(state="disabled")
+            self.close_btn.configure(state="normal")
+
+        self.after(0, update)
+
+    def is_cancelled(self) -> bool:
+        """Verifica si el usuario cancelo."""
+        return self._cancelled
+
+    def _on_cancel(self) -> None:
+        self._cancelled = True
+        self.log("Cancelando operacion...", "warning")
+        self.cancel_btn.configure(state="disabled")
+        self.status_label.configure(text="Cancelando...")
+
+    def _on_close(self) -> None:
+        self.grab_release()
+        self.destroy()
+
+    def _on_close_attempt(self) -> None:
+        if self._completed:
+            self._on_close()
+        else:
+            self._on_cancel()
 
 
 class Pdf2WordApp(ctk.CTk):

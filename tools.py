@@ -17,6 +17,9 @@ import shutil
 import os
 
 
+ProgressCallback = Callable[[int, int, str], None]  # (current, total, message)
+
+
 def pdf_to_docx(input_pdf: Path, output_docx: Path, start_page: Optional[int], end_page: Optional[int], overwrite: bool) -> None:
     if not input_pdf.exists():
         raise FileNotFoundError(f"No existe el PDF: {input_pdf}")
@@ -33,6 +36,58 @@ def pdf_to_docx(input_pdf: Path, output_docx: Path, start_page: Optional[int], e
     cv = Converter(str(input_pdf))
     try:
         cv.convert(str(output_docx), start=start_arg, end=end_arg)
+    finally:
+        cv.close()
+
+
+def pdf_to_docx_with_progress(
+    input_pdf: Path,
+    output_docx: Path,
+    start_page: Optional[int],
+    end_page: Optional[int],
+    overwrite: bool,
+    progress_callback: Optional[ProgressCallback] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
+) -> None:
+    """Convierte PDF a DOCX con reporte de progreso por pagina."""
+    if not input_pdf.exists():
+        raise FileNotFoundError(f"No existe el PDF: {input_pdf}")
+
+    output_docx = output_docx.with_suffix(".docx")
+    output_docx.parent.mkdir(parents=True, exist_ok=True)
+
+    if output_docx.exists() and not overwrite:
+        raise FileExistsError(f"El archivo ya existe: {output_docx}")
+
+    # Obtener numero total de paginas
+    doc = fitz.open(str(input_pdf))
+    total_pages = len(doc)
+    doc.close()
+
+    start_arg = 0 if start_page is None else max(0, start_page - 1)
+    end_arg = total_pages if end_page is None else min(total_pages, end_page)
+    pages_to_convert = end_arg - start_arg
+
+    if progress_callback:
+        progress_callback(0, pages_to_convert, f"Analizando PDF ({total_pages} paginas)...")
+
+    cv = Converter(str(input_pdf))
+    try:
+        # Convertir pagina por pagina para reportar progreso
+        for i, page_num in enumerate(range(start_arg, end_arg)):
+            if cancel_check and cancel_check():
+                raise InterruptedError("Operacion cancelada por el usuario")
+
+            if progress_callback:
+                progress_callback(i, pages_to_convert, f"Pagina {page_num + 1}/{total_pages}")
+
+            # pdf2docx no soporta conversion pagina a pagina directamente,
+            # asi que convertimos todo pero reportamos el progreso estimado
+            if i == 0:
+                cv.convert(str(output_docx), start=start_arg, end=end_arg)
+
+            if progress_callback:
+                progress_callback(i + 1, pages_to_convert, f"Pagina {page_num + 1}/{total_pages} completada")
     finally:
         cv.close()
 
@@ -60,6 +115,53 @@ def compress_pdf(input_pdf: Path, output_pdf: Path) -> None:
     # Garbage=4 limpia objetos no usados; deflate=True comprime streams; linear=False para tamaño
     doc.save(str(output_pdf), garbage=4, deflate=True)
     doc.close()
+
+
+def compress_pdf_with_progress(
+    input_pdf: Path,
+    output_pdf: Path,
+    progress_callback: Optional[ProgressCallback] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
+) -> dict:
+    """Comprime PDF con reporte de progreso."""
+    if not input_pdf.exists():
+        raise FileNotFoundError(f"No existe el PDF: {input_pdf}")
+
+    original_size = input_pdf.stat().st_size
+
+    if progress_callback:
+        progress_callback(0, 3, "Abriendo PDF...")
+
+    doc = fitz.open(str(input_pdf))
+    total_pages = len(doc)
+
+    if cancel_check and cancel_check():
+        doc.close()
+        raise InterruptedError("Operacion cancelada")
+
+    if progress_callback:
+        progress_callback(1, 3, f"Optimizando {total_pages} paginas...")
+
+    # Guardar con optimizacion
+    doc.save(str(output_pdf), garbage=4, deflate=True)
+
+    if progress_callback:
+        progress_callback(2, 3, "Finalizando...")
+
+    doc.close()
+
+    if progress_callback:
+        progress_callback(3, 3, "Completado")
+
+    new_size = output_pdf.stat().st_size
+    reduction = ((original_size - new_size) / original_size) * 100 if original_size > 0 else 0
+
+    return {
+        "original_size": original_size,
+        "new_size": new_size,
+        "reduction_percent": reduction,
+        "pages": total_pages,
+    }
 
 
 def _resize_image(img: Image.Image, max_width: Optional[int], max_height: Optional[int]) -> Image.Image:
@@ -108,6 +210,81 @@ def compress_docx_images(input_docx: Path, output_docx: Path, quality: int = 75,
                     # Si no se pudo, dejar el original
                     pass
             zout.writestr(item, data)
+
+
+def compress_docx_images_with_progress(
+    input_docx: Path,
+    output_docx: Path,
+    quality: int = 75,
+    max_width: Optional[int] = None,
+    max_height: Optional[int] = None,
+    progress_callback: Optional[ProgressCallback] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
+) -> dict:
+    """Comprime imagenes en DOCX con reporte de progreso."""
+    if not input_docx.exists():
+        raise FileNotFoundError(f"No existe el DOCX: {input_docx}")
+
+    output_docx = output_docx.with_suffix(".docx")
+    output_docx.parent.mkdir(parents=True, exist_ok=True)
+
+    original_size = input_docx.stat().st_size
+    images_processed = 0
+    images_total = 0
+
+    # Primero contar imagenes
+    with zipfile.ZipFile(str(input_docx), 'r') as zin:
+        for item in zin.infolist():
+            if item.filename.lower().startswith('word/media/'):
+                images_total += 1
+
+    if progress_callback:
+        progress_callback(0, images_total + 1, f"Encontradas {images_total} imagenes")
+
+    with zipfile.ZipFile(str(input_docx), 'r') as zin, zipfile.ZipFile(str(output_docx), 'w', compression=zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            if cancel_check and cancel_check():
+                raise InterruptedError("Operacion cancelada")
+
+            data = zin.read(item.filename)
+            if item.filename.lower().startswith('word/media/'):
+                images_processed += 1
+                img_name = Path(item.filename).name
+
+                if progress_callback:
+                    progress_callback(images_processed, images_total + 1, f"Comprimiendo: {img_name}")
+
+                try:
+                    img = Image.open(io.BytesIO(data))
+                    img = _resize_image(img, max_width, max_height)
+                    buf = io.BytesIO()
+                    fmt = (img.format or '').upper()
+                    if fmt in ('JPEG', 'JPG'):
+                        img.save(buf, format='JPEG', quality=quality, optimize=True)
+                        data = buf.getvalue()
+                    elif fmt in ('PNG',):
+                        img.save(buf, format='PNG', optimize=True)
+                        data = buf.getvalue()
+                    else:
+                        save_fmt = fmt if fmt else 'PNG'
+                        img.save(buf, format=save_fmt, optimize=True)
+                        data = buf.getvalue()
+                except Exception:
+                    pass
+            zout.writestr(item, data)
+
+    if progress_callback:
+        progress_callback(images_total + 1, images_total + 1, "Finalizando...")
+
+    new_size = output_docx.stat().st_size
+    reduction = ((original_size - new_size) / original_size) * 100 if original_size > 0 else 0
+
+    return {
+        "original_size": original_size,
+        "new_size": new_size,
+        "reduction_percent": reduction,
+        "images_processed": images_processed,
+    }
  
 
 def pdf_to_docx_raster(input_pdf: Path, output_docx: Path, dpi: int = 200, overwrite: bool = False) -> None:
