@@ -161,29 +161,43 @@ def batch_pdf_to_docx(
     end_page: Optional[int] = None,
     overwrite: bool = False,
     dpi: int = 200,
-) -> None:
+) -> tuple[int, list[tuple[Path, str]]]:
     out_dir.mkdir(parents=True, exist_ok=True)
+    ok = 0
+    errors: list[tuple[Path, str]] = []
     for f in files:
         if f.suffix.lower() != ".pdf":
             continue
         target = out_dir / (f.stem + ".docx")
-        if mode == "raster":
-            pdf_to_docx_raster(f, target, dpi=dpi, overwrite=overwrite)
-        else:
-            pdf_to_docx(f, target, start_page, end_page, overwrite)
+        try:
+            if mode == "raster":
+                pdf_to_docx_raster(f, target, dpi=dpi, overwrite=overwrite)
+            else:
+                pdf_to_docx(f, target, start_page, end_page, overwrite)
+            ok += 1
+        except Exception as e:
+            errors.append((f, str(e)))
+    return ok, errors
 
 
 def batch_docx_to_pdf(
     files: Iterable[Path],
     out_dir: Path,
     overwrite: bool = False,
-) -> None:
+) -> tuple[int, list[tuple[Path, str]]]:
     out_dir.mkdir(parents=True, exist_ok=True)
+    ok = 0
+    errors: list[tuple[Path, str]] = []
     for f in files:
         if f.suffix.lower() != ".docx":
             continue
         target = out_dir / (f.stem + ".pdf")
-        docx_to_pdf(f, target, overwrite)
+        try:
+            docx_to_pdf(f, target, overwrite)
+            ok += 1
+        except Exception as e:
+            errors.append((f, str(e)))
+    return ok, errors
 
 
 def scan_files(directory: Path) -> tuple[list[Path], list[Path]]:

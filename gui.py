@@ -343,6 +343,8 @@ class Pdf2WordApp(tk.Tk):
         ttk.Checkbutton(tab4, text="PDF → DOCX", variable=self.var_batch_pdf2docx).grid(row=3, column=0, sticky=tk.W, **pad)
         ttk.Checkbutton(tab4, text="Fidelidad exacta (imagen)", variable=self.var_batch_raster).grid(row=3, column=1, sticky=tk.W, **pad)
         ttk.Checkbutton(tab4, text="DOCX → PDF", variable=self.var_batch_docx2pdf).grid(row=3, column=2, sticky=tk.W, **pad)
+        self.var_batch_overwrite = tk.BooleanVar(value=True)
+        ttk.Checkbutton(tab4, text="Sobrescribir", variable=self.var_batch_overwrite).grid(row=4, column=2, sticky=tk.W, **pad)
         ttk.Label(tab4, text="DPI:").grid(row=4, column=0, sticky=tk.W, **pad)
         self.var_batch_dpi = tk.IntVar(value=200)
         ttk.Entry(tab4, textvariable=self.var_batch_dpi, width=10).grid(row=4, column=1, sticky=tk.W, **pad)
@@ -378,10 +380,11 @@ class Pdf2WordApp(tk.Tk):
         do_raster = bool(self.var_batch_raster.get())
         do_docx2pdf = bool(self.var_batch_docx2pdf.get())
         dpi = int(self.var_batch_dpi.get()) if str(self.var_batch_dpi.get()).strip() else 200
-        th = threading.Thread(target=self._run_batch_task, args=(items, outdir, do_pdf2docx, do_raster, do_docx2pdf, dpi), daemon=True)
+        overwrite = bool(self.var_batch_overwrite.get())
+        th = threading.Thread(target=self._run_batch_task, args=(items, outdir, do_pdf2docx, do_raster, do_docx2pdf, dpi, overwrite), daemon=True)
         th.start()
 
-    def _run_batch_task(self, items: list[Path], outdir: Path, do_pdf2docx: bool, do_raster: bool, do_docx2pdf: bool, dpi: int):
+    def _run_batch_task(self, items: list[Path], outdir: Path, do_pdf2docx: bool, do_raster: bool, do_docx2pdf: bool, dpi: int, overwrite: bool):
         try:
             self._set_status("Procesando lote…")
             self.progress.config(mode="determinate", maximum=max(1, len(items)))
@@ -393,15 +396,15 @@ class Pdf2WordApp(tk.Tk):
                 for p in pdfs:
                     tgt = outdir / (p.stem + ".docx")
                     if mode == "raster":
-                        pdf_to_docx_raster(p, tgt, dpi=dpi)
+                        pdf_to_docx_raster(p, tgt, dpi=dpi, overwrite=overwrite)
                     else:
-                        pdf_to_docx(p, tgt, None, None, True)
+                        pdf_to_docx(p, tgt, None, None, overwrite)
                     done += 1
                     self.progress.config(value=done)
             if do_docx2pdf:
                 for d in docxs:
                     tgt = outdir / (d.stem + ".pdf")
-                    docx_to_pdf(d, tgt, True)
+                    docx_to_pdf(d, tgt, overwrite)
                     done += 1
                     self.progress.config(value=done)
         except Exception as e:

@@ -110,11 +110,15 @@ def main():
         pdfs, docxs = scan_files(folder)
         if args.pdf2docx or args.pdf2docx_raster:
             mode = "raster" if args.pdf2docx_raster else "editable"
-            batch_pdf_to_docx(pdfs, outdir, mode=mode, overwrite=args.overwrite, dpi=args.dpi)
-            print(f"PDF→DOCX ({mode}) completado en: {outdir}")
+            ok, errs = batch_pdf_to_docx(pdfs, outdir, mode=mode, overwrite=args.overwrite, dpi=args.dpi)
+            print(f"PDF→DOCX ({mode}) completado en: {outdir} (ok={ok}, errores={len(errs)})")
+            for f, msg in errs:
+                print(f" - ERROR {f}: {msg}")
         if args.docx2pdf:
-            batch_docx_to_pdf(docxs, outdir, overwrite=args.overwrite)
-            print(f"DOCX→PDF completado en: {outdir}")
+            ok, errs = batch_docx_to_pdf(docxs, outdir, overwrite=args.overwrite)
+            print(f"DOCX→PDF completado en: {outdir} (ok={ok}, errores={len(errs)})")
+            for f, msg in errs:
+                print(f" - ERROR {f}: {msg}")
 
 
 if __name__ == "__main__":
