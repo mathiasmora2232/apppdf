@@ -1023,7 +1023,18 @@ class Pdf2WordApp(ctk.CTk):
         modal.log(f"Carpeta destino: {outdir}")
         modal.log(f"Calidad: {quality_str} (DPI: {dpi})")
 
+        # Lista para rastrear archivos convertidos exitosamente
+        successful_files: list[Path] = []
+
+        def remove_successful_from_list():
+            """Elimina los archivos exitosos de la lista principal."""
+            for f in successful_files:
+                if f in self.batch_files:
+                    self.batch_files.remove(f)
+            self._update_file_list()
+
         def task():
+            nonlocal successful_files
             try:
                 total = 0
                 if do_pdf2docx:
@@ -1051,6 +1062,7 @@ class Pdf2WordApp(ctk.CTk):
                         tgt = outdir / (p.stem + ".docx")
                         modal.log(f"Procesando: {p.name}", "progress")
 
+                        converted = False
                         try:
                             if do_raster:
                                 pdf_to_docx_raster(p, tgt, dpi=dpi, overwrite=overwrite)
@@ -1058,6 +1070,7 @@ class Pdf2WordApp(ctk.CTk):
                                 pdf_to_docx(p, tgt, None, None, overwrite)
                             modal.log(f"Completado: {p.name}", "success")
                             success_count += 1
+                            converted = True
                         except Exception as e:
                             if not do_raster:
                                 modal.log(f"Fallo en editable: {e}. Intentando modo imagen...", "warning")
@@ -1065,12 +1078,17 @@ class Pdf2WordApp(ctk.CTk):
                                     pdf_to_docx_raster(p, tgt, dpi=dpi, overwrite=overwrite)
                                     modal.log(f"Completado (fallback imagen): {p.name}", "success")
                                     success_count += 1
+                                    converted = True
                                 except Exception as e2:
                                     modal.log(f"Error en {p.name}: {e2}", "error")
                                     errors.append((p.name, str(e2)))
                             else:
                                 modal.log(f"Error en {p.name}: {e}", "error")
                                 errors.append((p.name, str(e)))
+
+                        # Marcar como exitoso para eliminarlo de la lista
+                        if converted:
+                            successful_files.append(p)
 
                         done += 1
                         modal.set_progress(done, total, f"{done}/{total} archivos")
@@ -1085,13 +1103,19 @@ class Pdf2WordApp(ctk.CTk):
                         tgt = outdir / (d.stem + ".pdf")
                         modal.log(f"Procesando: {d.name}", "progress")
 
+                        converted = False
                         try:
                             docx_to_pdf(d, tgt, overwrite)
                             modal.log(f"Completado: {d.name}", "success")
                             success_count += 1
+                            converted = True
                         except Exception as e:
                             modal.log(f"Error en {d.name}: {e}", "error")
                             errors.append((d.name, str(e)))
+
+                        # Marcar como exitoso para eliminarlo de la lista
+                        if converted:
+                            successful_files.append(d)
 
                         done += 1
                         modal.set_progress(done, total, f"{done}/{total} archivos")
@@ -1106,15 +1130,28 @@ class Pdf2WordApp(ctk.CTk):
                         modal.log(f"  - {fname}: {err[:50]}...", "error")
                     if len(errors) > 10:
                         modal.log(f"  ... y {len(errors) - 10} mas", "warning")
+                    modal.log("")
+                    modal.log(f"Los {len(errors)} archivos fallidos permanecen en la lista para reintentar.", "warning")
                     modal.complete(True, f"Completado: {success_count} OK, {len(errors)} errores")
                 else:
                     modal.complete(True, f"Lote completado: {done} archivos")
 
+                # Eliminar archivos exitosos de la lista (en el hilo principal)
+                if successful_files:
+                    self.after(0, remove_successful_from_list)
+
             except InterruptedError:
                 modal.log("Operacion cancelada por el usuario", "warning")
+                modal.log(f"Se procesaron {len(successful_files)} archivos antes de cancelar.", "warning")
+                # Eliminar los que sí se procesaron
+                if successful_files:
+                    self.after(0, remove_successful_from_list)
                 modal.complete(False, "Operacion cancelada")
             except Exception as e:
                 modal.log(str(e), "error")
+                # Eliminar los que sí se procesaron
+                if successful_files:
+                    self.after(0, remove_successful_from_list)
                 modal.complete(False, str(e))
 
         th = threading.Thread(target=task, daemon=True)
