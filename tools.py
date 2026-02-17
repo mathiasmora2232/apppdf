@@ -106,6 +106,119 @@ def pdf_to_docx_with_progress(
 # DOCX -> PDF
 # ===========================================================================
 
+
+
+def analyze_pdf(input_pdf: Path) -> dict:
+    """Analiza un PDF y sugiere el mejor modo de conversión."""
+    import fitz
+
+    doc = fitz.open(str(input_pdf))
+    try:
+        total_pages = doc.page_count
+        total_words = 0
+        pages_with_text = 0
+        pages_with_images = 0
+
+        for i in range(total_pages):
+            page = doc[i]
+            words = page.get_text("words")
+            image_count = len(page.get_images(full=True))
+
+            total_words += len(words)
+            if words:
+                pages_with_text += 1
+            if image_count:
+                pages_with_images += 1
+
+        avg_words_per_page = total_words / total_pages if total_pages else 0
+        text_ratio = pages_with_text / total_pages if total_pages else 0
+        image_ratio = pages_with_images / total_pages if total_pages else 0
+
+        scanned_likely = avg_words_per_page < 25 and image_ratio > 0.7
+
+        if scanned_likely:
+            recommended = "ocr"
+            reason = "Pocas palabras detectadas y alto contenido de imagen (escaneo probable)."
+        elif text_ratio > 0.8:
+            recommended = "editable"
+            reason = "La mayoría de páginas contiene texto extraíble."
+        else:
+            recommended = "smart"
+            reason = "Documento mixto; conviene probar editable y fallback automático."
+
+        return {
+            "pages": total_pages,
+            "total_words": total_words,
+            "avg_words_per_page": round(avg_words_per_page, 2),
+            "text_page_ratio": round(text_ratio, 3),
+            "image_page_ratio": round(image_ratio, 3),
+            "scanned_likely": scanned_likely,
+            "recommended_mode": recommended,
+            "reason": reason,
+        }
+    finally:
+        doc.close()
+
+
+def pdf_to_docx_smart_with_progress(
+    input_pdf: Path,
+    output_docx: Path,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    overwrite: bool = False,
+    ocr_lang: str = "spa",
+    raster_dpi: int = 220,
+    progress_callback: Optional[ProgressCallback] = None,
+    cancel_check: Optional[CancelCheck] = None,
+) -> dict:
+    """Convierte PDF->DOCX con selección automática y fallback."""
+    profile = analyze_pdf(input_pdf)
+
+    if progress_callback:
+        progress_callback(0, 1, f"Perfil detectado: {profile['recommended_mode']} | {profile['reason']}")
+
+    mode = profile["recommended_mode"]
+
+    if mode == "ocr":
+        ocr_pdf_to_docx_with_progress(
+            input_pdf,
+            output_docx,
+            dpi=max(250, raster_dpi),
+            lang=ocr_lang,
+            progress_callback=progress_callback,
+            cancel_check=cancel_check,
+        )
+        return {"mode_used": "ocr", "profile": profile}
+
+    try:
+        pdf_to_docx_with_progress(
+            input_pdf,
+            output_docx,
+            start,
+            end,
+            overwrite,
+            progress_callback=progress_callback,
+            cancel_check=cancel_check,
+        )
+        return {"mode_used": "editable", "profile": profile}
+    except Exception as first_error:
+        if progress_callback:
+            progress_callback(0, 1, f"Editable falló, usando raster 1:1: {first_error}")
+
+        pdf_to_docx_raster_with_progress(
+            input_pdf,
+            output_docx,
+            dpi=raster_dpi,
+            overwrite=overwrite,
+            progress_callback=progress_callback,
+            cancel_check=cancel_check,
+        )
+        return {
+            "mode_used": "raster_fallback",
+            "profile": profile,
+            "fallback_reason": str(first_error),
+        }
+
 def docx_to_pdf(
     input_docx: Path,
     output_pdf: Path,
@@ -419,6 +532,63 @@ def docx_to_pdf_with_progress(
     raise RuntimeError(f"No se pudo convertir. Errores: {'; '.join(errors)}")
 
 
+def scan_files(folder: Path) -> tuple[list[Path], list[Path]]:
+    """Escanea una carpeta y retorna listas de PDF y DOCX."""
+    if not folder.exists() or not folder.is_dir():
+        raise NotADirectoryError(f"No es una carpeta válida: {folder}")
+
+    pdfs = sorted(p for p in folder.glob("*.pdf") if p.is_file())
+    docxs = sorted(p for p in folder.glob("*.docx") if p.is_file())
+    return pdfs, docxs
+
+
+def batch_pdf_to_docx(
+    input_files: list[Path],
+    output_dir: Path,
+    mode: str = "editable",
+    overwrite: bool = False,
+    dpi: int = 200,
+) -> tuple[int, list[tuple[str, str]]]:
+    """Convierte una lista de PDFs a DOCX en lote."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    ok = 0
+    errors: list[tuple[str, str]] = []
+
+    for input_pdf in input_files:
+        output_docx = output_dir / f"{input_pdf.stem}.docx"
+        try:
+            if mode == "raster":
+                pdf_to_docx_raster(input_pdf, output_docx, dpi=dpi, overwrite=overwrite)
+            else:
+                pdf_to_docx(input_pdf, output_docx, overwrite=overwrite)
+            ok += 1
+        except Exception as e:
+            errors.append((input_pdf.name, str(e)))
+
+    return ok, errors
+
+
+def batch_docx_to_pdf(
+    input_files: list[Path],
+    output_dir: Path,
+    overwrite: bool = False,
+) -> tuple[int, list[tuple[str, str]]]:
+    """Convierte una lista de DOCX a PDF en lote."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    ok = 0
+    errors: list[tuple[str, str]] = []
+
+    for input_docx in input_files:
+        output_pdf = output_dir / f"{input_docx.stem}.pdf"
+        try:
+            docx_to_pdf(input_docx, output_pdf, overwrite=overwrite)
+            ok += 1
+        except Exception as e:
+            errors.append((input_docx.name, str(e)))
+
+    return ok, errors
+
+
 # ===========================================================================
 # PDF -> DOCX (Raster/Imagen)
 # ===========================================================================
@@ -625,13 +795,23 @@ def ocr_pdf_to_docx_with_progress(
 def compress_pdf_with_progress(
     input_pdf: Path,
     output_pdf: Path,
+    mode: str = "lossless",
+    image_quality: int = 65,
+    dpi: int = 150,
     progress_callback: Optional[ProgressCallback] = None,
     cancel_check: Optional[CancelCheck] = None
 ) -> dict:
-    """Optimiza/comprime un PDF."""
-    import pikepdf
+    """Optimiza/comprime un PDF.
+
+    mode:
+    - lossless: limpia y aplica compresión sin pérdida.
+    - balanced: rasteriza páginas a JPEG moderado para reducir más.
+    - aggressive: rasteriza con más compresión.
+    """
+    import fitz
 
     original_size = input_pdf.stat().st_size
+    mode = (mode or "lossless").lower()
 
     if progress_callback:
         progress_callback(0, 3, "Abriendo PDF...")
@@ -639,21 +819,49 @@ def compress_pdf_with_progress(
     if cancel_check and cancel_check():
         raise InterruptedError("Operación cancelada")
 
-    with pikepdf.open(str(input_pdf)) as pdf:
-        if progress_callback:
-            progress_callback(1, 3, "Optimizando contenido...")
+    if mode == "lossless":
+        with fitz.open(str(input_pdf)) as doc:
+            if progress_callback:
+                progress_callback(1, 3, "Aplicando optimización sin pérdida...")
 
-        if cancel_check and cancel_check():
-            raise InterruptedError("Operación cancelada")
+            doc.save(
+                str(output_pdf),
+                garbage=4,
+                deflate=True,
+                clean=True,
+                linear=True,
+            )
+    else:
+        effective_quality = max(20, min(95, image_quality if mode != "aggressive" else min(image_quality, 55)))
+        effective_dpi = max(72, min(300, dpi if mode != "aggressive" else min(dpi, 120)))
 
-        if progress_callback:
-            progress_callback(2, 3, "Guardando PDF optimizado...")
+        src = fitz.open(str(input_pdf))
+        out = fitz.open()
+        try:
+            total_pages = src.page_count
+            for i in range(total_pages):
+                if cancel_check and cancel_check():
+                    raise InterruptedError("Operación cancelada")
 
-        pdf.save(
-            str(output_pdf),
-            compress_streams=True,
-            object_stream_mode=pikepdf.ObjectStreamMode.generate
-        )
+                if progress_callback:
+                    progress_callback(1, 3, f"Rasterizando página {i+1}/{total_pages}...")
+
+                page = src[i]
+                mat = fitz.Matrix(effective_dpi / 72, effective_dpi / 72)
+                pix = page.get_pixmap(matrix=mat, alpha=False)
+                jpeg = pix.tobytes("jpg", jpg_quality=effective_quality)
+
+                rect = page.rect
+                new_page = out.new_page(width=rect.width, height=rect.height)
+                new_page.insert_image(rect, stream=jpeg)
+
+            if progress_callback:
+                progress_callback(2, 3, "Guardando PDF comprimido...")
+
+            out.save(str(output_pdf), garbage=4, deflate=True, clean=True, linear=True)
+        finally:
+            src.close()
+            out.close()
 
     new_size = output_pdf.stat().st_size
     reduction = ((original_size - new_size) / original_size) * 100 if original_size > 0 else 0
@@ -664,7 +872,8 @@ def compress_pdf_with_progress(
     return {
         "original_size": original_size,
         "new_size": new_size,
-        "reduction_percent": max(0, reduction)
+        "reduction_percent": max(0, reduction),
+        "mode": mode,
     }
 
 
@@ -1008,3 +1217,67 @@ def extract_images_from_docx(
                 extracted.append(output_path)
 
     return extracted
+
+
+def ocr_pdf_to_docx(
+    input_pdf: Path,
+    output_docx: Path,
+    dpi: int = 300,
+    lang: str = "spa"
+) -> None:
+    """Wrapper simple de OCR PDF -> DOCX sin callbacks."""
+    ocr_pdf_to_docx_with_progress(input_pdf, output_docx, dpi=dpi, lang=lang)
+
+
+def compress_pdf(
+    input_pdf: Path,
+    output_pdf: Path,
+    mode: str = "lossless",
+    image_quality: int = 65,
+    dpi: int = 150
+) -> dict:
+    """Wrapper simple para compresión de PDF sin callbacks."""
+    return compress_pdf_with_progress(
+        input_pdf,
+        output_pdf,
+        mode=mode,
+        image_quality=image_quality,
+        dpi=dpi,
+    )
+
+
+def compress_docx_images(
+    input_docx: Path,
+    output_docx: Path,
+    quality: int = 75,
+    max_width: Optional[int] = None,
+    max_height: Optional[int] = None
+) -> dict:
+    """Wrapper simple para compresión de imágenes de DOCX sin callbacks."""
+    return compress_docx_images_with_progress(
+        input_docx, output_docx,
+        quality=quality,
+        max_width=max_width,
+        max_height=max_height
+    )
+
+
+def pdf_to_docx_smart(
+    input_pdf: Path,
+    output_docx: Path,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    overwrite: bool = False,
+    ocr_lang: str = "spa",
+    raster_dpi: int = 220
+) -> dict:
+    """Wrapper de conversión inteligente sin callbacks."""
+    return pdf_to_docx_smart_with_progress(
+        input_pdf,
+        output_docx,
+        start=start,
+        end=end,
+        overwrite=overwrite,
+        ocr_lang=ocr_lang,
+        raster_dpi=raster_dpi,
+    )

@@ -6,7 +6,7 @@ from typing import Optional, Callable
 from datetime import datetime
 
 from tools import (
-    pdf_to_docx, pdf_to_docx_with_progress,
+    pdf_to_docx, pdf_to_docx_with_progress, pdf_to_docx_smart_with_progress,
     docx_to_pdf, docx_to_pdf_with_progress,
     compress_pdf_with_progress,
     compress_docx_images_with_progress,
@@ -217,6 +217,8 @@ class Pdf2WordApp(ctk.CTk):
         self.var_raster_dpi = ctk.IntVar(value=200)
         self.var_ocr_lang = ctk.StringVar(value="spa")
         self.var_ocr_dpi = ctk.IntVar(value=300)
+        self.var_smart_ocr_lang = ctk.StringVar(value="spa")
+        self.var_smart_raster_dpi = ctk.IntVar(value=220)
 
         # Variables - DOCX->PDF
         self.var_docx_in = ctk.StringVar()
@@ -226,6 +228,9 @@ class Pdf2WordApp(ctk.CTk):
         # Variables - Compresion
         self.var_pdf_comp_in = ctk.StringVar()
         self.var_pdf_comp_out = ctk.StringVar()
+        self.var_pdf_comp_mode = ctk.StringVar(value="lossless")
+        self.var_pdf_comp_quality = ctk.IntVar(value=65)
+        self.var_pdf_comp_dpi = ctk.IntVar(value=150)
         self.var_docx_comp_in = ctk.StringVar()
         self.var_docx_comp_out = ctk.StringVar()
         self.var_quality = ctk.IntVar(value=75)
@@ -341,6 +346,16 @@ class Pdf2WordApp(ctk.CTk):
         mode_frame = ctk.CTkFrame(main_frame, fg_color=("gray90", "gray17"))
         mode_frame.pack(fill="x", pady=(0, 15))
         mode_frame.grid_columnconfigure((0, 1, 2), weight=1)
+
+        # Conversion inteligente
+        smart_card = self._create_card(mode_frame, "Inteligente (Recomendado)", "Busca equilibrio editable + fallback 1:1")
+        smart_opts = ctk.CTkFrame(smart_card, fg_color="transparent")
+        smart_opts.pack(fill="x", padx=15, pady=(8, 0))
+        ctk.CTkLabel(smart_opts, text="OCR lang:", width=70).pack(side="left")
+        ctk.CTkEntry(smart_opts, textvariable=self.var_smart_ocr_lang, width=60).pack(side="left", padx=5)
+        ctk.CTkLabel(smart_opts, text="DPI fallback:", width=95).pack(side="left", padx=(10, 0))
+        ctk.CTkEntry(smart_opts, textvariable=self.var_smart_raster_dpi, width=70).pack(side="left", padx=5)
+        ctk.CTkButton(smart_card, text="Convertir Inteligente", fg_color="#8E44AD", hover_color="#6C3483", command=self.on_convert_pdf2docx_smart).pack(pady=(8, 15), padx=15, fill="x")
 
         # Conversion editable
         edit_card = self._create_card(mode_frame, "Editable", "Texto editable, puede perder formato")
@@ -543,7 +558,16 @@ class Pdf2WordApp(ctk.CTk):
         ctk.CTkEntry(pdf_frame, textvariable=self.var_pdf_comp_out, placeholder_text="PDF optimizado...").grid(row=1, column=1, padx=5, pady=12, sticky="ew")
         ctk.CTkButton(pdf_frame, text="Guardar como", width=100, command=self.on_browse_pdf_comp_out).grid(row=1, column=2, padx=15, pady=12)
 
-        ctk.CTkButton(pdf_frame, text="Optimizar PDF", width=150, fg_color="#9C27B0", hover_color="#7B1FA2", command=self.on_compress_pdf).grid(row=2, column=2, padx=15, pady=15)
+        opts_pdf = ctk.CTkFrame(pdf_frame, fg_color="transparent")
+        opts_pdf.grid(row=2, column=0, columnspan=3, padx=15, pady=8, sticky="ew")
+        ctk.CTkLabel(opts_pdf, text="Modo:").pack(side="left")
+        ctk.CTkOptionMenu(opts_pdf, values=["lossless", "balanced", "aggressive"], variable=self.var_pdf_comp_mode, width=120).pack(side="left", padx=8)
+        ctk.CTkLabel(opts_pdf, text="Calidad:").pack(side="left", padx=(10, 0))
+        ctk.CTkEntry(opts_pdf, textvariable=self.var_pdf_comp_quality, width=60).pack(side="left", padx=5)
+        ctk.CTkLabel(opts_pdf, text="DPI:").pack(side="left", padx=(10, 0))
+        ctk.CTkEntry(opts_pdf, textvariable=self.var_pdf_comp_dpi, width=60).pack(side="left", padx=5)
+
+        ctk.CTkButton(pdf_frame, text="Optimizar PDF", width=150, fg_color="#9C27B0", hover_color="#7B1FA2", command=self.on_compress_pdf).grid(row=3, column=2, padx=15, pady=15)
 
         # Compresion DOCX
         self._create_section_label(main_frame, "Comprimir Imagenes en DOCX")
@@ -775,6 +799,49 @@ class Pdf2WordApp(ctk.CTk):
         th = threading.Thread(target=task, daemon=True)
         th.start()
 
+    def on_convert_pdf2docx_smart(self) -> None:
+        in_path = self.var_input.get().strip()
+        out_path = self.var_output.get().strip()
+        if not in_path:
+            messagebox.showwarning("Falta archivo", "Selecciona un archivo PDF de entrada.")
+            return
+
+        input_pdf = Path(in_path)
+        output_docx = Path(out_path) if out_path else input_pdf.with_suffix(".docx")
+        overwrite = bool(self.var_overwrite.get())
+        ocr_lang = self.var_smart_ocr_lang.get().strip() or "spa"
+        raster_dpi = int(self.var_smart_raster_dpi.get()) if str(self.var_smart_raster_dpi.get()).strip() else 220
+
+        modal = ProgressModal(self, "Conversion Inteligente PDF→DOCX")
+        modal.log(f"Archivo: {input_pdf.name}")
+        modal.log("Estrategia: editable + fallback 1:1")
+
+        def task():
+            try:
+                def progress_cb(current, total, msg):
+                    modal.set_progress(current, total, msg)
+                    modal.log(msg, "progress")
+
+                result = pdf_to_docx_smart_with_progress(
+                    input_pdf,
+                    output_docx,
+                    overwrite=overwrite,
+                    ocr_lang=ocr_lang,
+                    raster_dpi=raster_dpi,
+                    progress_callback=progress_cb,
+                    cancel_check=modal.is_cancelled,
+                )
+                modal.log(f"Modo usado: {result['mode_used']}", "success")
+                modal.complete(True, f"Archivo creado: {output_docx.name}")
+            except InterruptedError:
+                modal.complete(False, "Operacion cancelada")
+            except Exception as e:
+                modal.log(str(e), "error")
+                modal.complete(False, str(e))
+
+        th = threading.Thread(target=task, daemon=True)
+        th.start()
+
     def on_convert_pdf2docx_raster(self) -> None:
         in_path = self.var_input.get().strip()
         out_path = self.var_output.get().strip()
@@ -883,10 +950,15 @@ class Pdf2WordApp(ctk.CTk):
         input_path = Path(inp)
         output_path = Path(out)
 
+        mode = (self.var_pdf_comp_mode.get() or "lossless").strip()
+        quality = int(self.var_pdf_comp_quality.get()) if str(self.var_pdf_comp_quality.get()).strip() else 65
+        dpi = int(self.var_pdf_comp_dpi.get()) if str(self.var_pdf_comp_dpi.get()).strip() else 150
+
         modal = ProgressModal(self, "Optimizando PDF")
         modal.log(f"Archivo: {input_path.name}")
         original_size = input_path.stat().st_size
         modal.log(f"Tamaño original: {self._format_size(original_size)}")
+        modal.log(f"Modo: {mode} | Calidad: {quality} | DPI: {dpi}")
 
         def task():
             try:
@@ -896,6 +968,9 @@ class Pdf2WordApp(ctk.CTk):
 
                 result = compress_pdf_with_progress(
                     input_path, output_path,
+                    mode=mode,
+                    image_quality=max(20, min(95, quality)),
+                    dpi=max(72, min(300, dpi)),
                     progress_callback=progress_cb,
                     cancel_check=modal.is_cancelled
                 )
