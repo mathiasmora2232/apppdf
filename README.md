@@ -61,11 +61,20 @@ C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe cli.py --help
 # PDF → DOCX
 C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe cli.py pdf2docx "input.pdf" -o "output.docx" --start 1 --end 3 --overwrite
 
+# PDF → DOCX inteligente (recomendado para mejor 1:1 con fallback)
+C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe cli.py smart-pdf2docx "input.pdf" -o "output.docx" --ocr-lang spa --raster-dpi 220
+
+# Auditoría de PDF (sugiere modo ideal)
+C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe cli.py analyze "input.pdf"
+
 # DOCX → PDF (requiere Microsoft Word instalado en Windows)
 C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe cli.py docx2pdf "input.docx" -o "output.pdf" --overwrite
 
-# Optimizar PDF (reduce tamaño limpiando y deflating)
-C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe cli.py compress-pdf "input.pdf" -o "optimized.pdf"
+# Optimizar PDF
+# - lossless: sin pérdida
+# - balanced: compresión con raster moderada
+# - aggressive: máxima compresión con pérdida
+C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe cli.py compress-pdf "input.pdf" -o "optimized.pdf" --mode balanced --quality 65 --dpi 150
 
 # Comprimir imágenes dentro de DOCX
 C:/Users/USER/Desktop/programs/apppdf/.venv/Scripts/python.exe cli.py compress-docx "input.docx" -o "compressed.docx" --quality 70 --max-width 1600 --max-height 1200
